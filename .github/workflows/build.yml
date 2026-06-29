@@ -7,20 +7,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Xcode
+      - name: Setup Xcode 16.0
         run: |
-          # List available Xcode versions
-          ls -d /Applications/Xcode*.app 2>/dev/null
-          # Use Xcode 16.1 or 16.2 if available (they include iOS 18.1+ SDK)
-          for ver in 16.2 16.1 16; do
-            if [ -d "/Applications/Xcode_${ver}.app" ]; then
-              sudo xcode-select -s "/Applications/Xcode_${ver}.app/Contents/Developer"
-              echo "Selected Xcode ${ver}"
-              break
-            fi
-          done
+          sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
           xcodebuild -version
-          xcodebuild -showsdks | grep iphoneos | head -5
+          xcodebuild -showsdks 2>&1 | grep -i "iphoneos" | head -5
+
+      - name: Install iOS platform if needed
+        run: |
+          # Check if iphoneos SDK exists
+          if ! xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
+            echo "iOS SDK not found, downloading..."
+            xcodebuild -downloadPlatform iOS || true
+          fi
 
       - name: Resolve packages
         run: |
