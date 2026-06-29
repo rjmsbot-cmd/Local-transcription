@@ -7,20 +7,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Xcode and install iOS SDK
+      - name: Setup Xcode 16.0
         run: |
-          # Try Xcode versions in order of preference
-          for ver in 16.2 16.1 16 16.0; do
-            if [ -d "/Applications/Xcode_${ver}.app" ]; then
-              sudo xcode-select -s "/Applications/Xcode_${ver}.app/Contents/Developer"
-              echo "Selected Xcode ${ver}"
-              break
-            fi
-          done
+          sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
           xcodebuild -version
-          # Install iOS platform
-          xcodebuild -downloadPlatform iOS 2>&1 || true
-          xcodebuild -showsdks 2>&1 | grep iphoneos | head -3
+          # List available SDKs
+          ls /Applications/Xcode_16.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/ 2>/dev/null || echo "No iPhoneOS SDK found"
 
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project WhisperLocal.xcodeproj -scheme WhisperLocal
