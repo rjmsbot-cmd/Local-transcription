@@ -3,28 +3,24 @@ on: workflow_dispatch
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
-      - name: List available Xcode versions
-        run: ls /Applications/Xcode*.app 2>/dev/null || true
-
-      - name: Select Xcode
+      - name: Setup Xcode and iOS platform
         run: |
-          if [ -d "/Applications/Xcode_16.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
-          elif [ -d "/Applications/Xcode_15.4.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
-          else
-            sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-          fi
+          sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
           xcodebuild -version
+          xcodebuild -downloadPlatform iOS
+          xcodebuild -showsdks | grep iphoneos
 
       - name: Resolve packages
-        run: xcodebuild -resolvePackageDependencies -project WhisperLocal.xcodeproj -scheme WhisperLocal
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project WhisperLocal.xcodeproj \
+            -scheme WhisperLocal
 
-      - name: Build for generic iOS
+      - name: Build for iOS device
         run: |
           xcodebuild -project WhisperLocal.xcodeproj \
             -scheme WhisperLocal \
