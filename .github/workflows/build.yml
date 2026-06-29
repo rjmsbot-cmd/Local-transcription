@@ -1,0 +1,34 @@
+name: Build IPA
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project WhisperLocal.xcodeproj -scheme WhisperLocal
+
+      - name: Build
+        run: |
+          xcodebuild -project WhisperLocal.xcodeproj \
+            -scheme WhisperLocal \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Create IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/WhisperLocal.app Payload/
+          zip -r WhisperLocal.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhisperLocal-IPA
+          path: WhisperLocal.ipa
