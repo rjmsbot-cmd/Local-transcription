@@ -1,10 +1,16 @@
 import Foundation
 
-struct TranscriptionTask {
-    let id: UUID
-    let fileURL: URL
-    let language: String?
-    let modelSize: String
+enum TranscriptionTask: String, CaseIterable, Identifiable {
+    case transcribe = "transcribe"
+    case translate = "translate"
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .transcribe: return "Transcribe"
+        case .translate: return "Translate"
+        }
+    }
 }
 
 struct TranscriptionProgress {
@@ -43,12 +49,17 @@ class TranscriptionEngine {
         whisperProcessorLoaded = true
     }
 
+    func loadModel(at path: String) async throws {
+        try await whisperProcessor.loadModel(path: path)
+        loadedModelPath = path
+        whisperProcessorLoaded = true
+    }
+
     func transcribe(
-        url: URL,
+        audioAt url: URL,
         language: String? = nil,
-        modelSize: String = "small",
-        task: TranscriptionTask,
-        progressCallback: @MainActor @escaping (TranscriptionProgress) -> Void
+        task: TranscriptionTask = .transcribe,
+        progressHandler: @MainActor @escaping (TranscriptionProgress) -> Void
     ) async throws -> TranscriptionResult {
         guard whisperProcessorLoaded else { throw TranscriptionError.noModelLoaded }
 
@@ -58,17 +69,21 @@ class TranscriptionEngine {
             return try await transcribeChunked(url: url, language: language, task: task, totalDuration: duration, progressCallback: progressCallback)
         }
 
-        await progressCallback(TranscriptionProgress(taskId: task.id, fraction: 0.1, phase: "Loading audio..."))
+        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.1, phase: "Loading audio..."))
         let (samples, _) = try await MainActor.run { try audioProcessor.loadAudio(from: url) }
 
-        await progressCallback(TranscriptionProgress(taskId: task.id, fraction: 0.3, phase: "Transcribing..."))
+        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.3, phase: "Transcribing..."))
         let result = try await whisperProcessor.transcribe(samples: samples, language: language)
 
-        await progressCallback(TranscriptionProgress(taskId: task.id, fraction: 1.0, phase: "Complete"))
+        let segments = result.segments.enumerated().map { i, seg in
+            Transcription.Segment(id: i, start: seg.start, end: seg.end, text: seg.text)
+        }
+
+        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 1.0, phase: "Complete"))
 
         return TranscriptionResult(
             text: result.text,
-            segments: result.segments,
+            segments: segments,
             duration: duration,
             language: language ?? "en"
         )
@@ -79,7 +94,7 @@ class TranscriptionEngine {
         language: String?,
         task: TranscriptionTask,
         totalDuration: TimeInterval,
-        progressCallback: @MainActor @escaping (TranscriptionProgress) -> Void
+        progressHandler: @MainActor @escaping (TranscriptionProgress) -> Void
     ) async throws -> TranscriptionResult {
         let chunks = try await MainActor.run { try audioProcessor.splitIntoChunks(at: url) }
         var allSegments: [Transcription.Segment] = []
@@ -88,7 +103,7 @@ class TranscriptionEngine {
 
         for (idx, chunk) in chunks.enumerated() {
             let chunkFrac = Double(idx) / Double(chunks.count)
-            await progressCallback(TranscriptionProgress(taskId: task.id, fraction: 0.1 + chunkFrac * 0.8, phase: "Chunk \(idx + 1)/\(chunks.count)..."))
+            await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.1 + chunkFrac * 0.8, phase: "Chunk \(idx + 1)/\(chunks.count)..."))
 
             let (samples, _) = try await MainActor.run { try audioProcessor.loadAudio(from: chunk.fileURL) }
             let result = try await whisperProcessor.transcribe(samples: samples, language: language)
@@ -104,7 +119,7 @@ class TranscriptionEngine {
         }
 
         await MainActor.run { audioProcessor.cleanupChunks(chunks) }
-        await progressCallback(TranscriptionProgress(taskId: task.id, fraction: 1.0, phase: "Complete"))
+        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 1.0, phase: "Complete"))
 
         return TranscriptionResult(
             text: fullTextParts.joined(separator: " "),

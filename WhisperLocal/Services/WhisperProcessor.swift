@@ -81,7 +81,13 @@ class WhisperProcessor {
         for frame in 0..<nFrames {
             let offset = frame * hopLength
             var windowedSamples = [Float](repeating: 0, count: nFFT)
-            vDSP_vmul(samples + offset, 1, window, 1, &windowedSamples, 1, vDSP_Length(nFFT))
+            samples.withUnsafeBufferPointer { samplesPtr in
+                window.withUnsafeBufferPointer { windowPtr in
+                    windowedSamples.withUnsafeMutableBufferPointer { outPtr in
+                        vDSP_vmul(samplesPtr.baseAddress! + offset, 1, windowPtr.baseAddress!, 1, outPtr.baseAddress!, 1, vDSP_Length(nFFT))
+                    }
+                }
+            }
 
             var realp = [Float](repeating: 0, count: nFFT / 2)
             var imagp = [Float](repeating: 0, count: nFFT / 2)
@@ -105,7 +111,9 @@ class WhisperProcessor {
                 let highBin = min(Int(highFreq * Float(nFFT) / Float(sampleRate)), nFFT / 2)
                 var sum: Float = 0
                 if highBin > lowBin {
-                    vDSP_sve(magnitudes + lowBin, 1, &sum, vDSP_Length(highBin - lowBin))
+                    magnitudes.withUnsafeBufferPointer { magPtr in
+                        vDSP_sve(magPtr.baseAddress! + lowBin, 1, &sum, vDSP_Length(highBin - lowBin))
+                    }
                 }
                 melSpectrogram[mel * nFrames + frame] = log(max(sum, 1e-10))
             }

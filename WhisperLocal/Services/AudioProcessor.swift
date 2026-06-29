@@ -16,6 +16,7 @@ struct AudioChunk {
 }
 
 class AudioProcessor {
+    static let supportedExtensions = ["mp3", "wav", "m4a", "aac", "flac", "ogg", "wma", "aiff", "opus"]
     private let whisperSampleRate: Double = 16000
 
     func loadAudio(from url: URL) throws -> (samples: [Float], sampleRate: Double) {
@@ -45,12 +46,10 @@ class AudioProcessor {
         }
 
         var error: NSError?
-        var capturedBuffer: AVAudioPCMBuffer?
 
-        converter.convert(to: outputBuffer, error: &error) { inBuffer, outStatus in
-            capturedBuffer = inBuffer as? AVAudioPCMBuffer
+        converter.convert(to: outputBuffer, error: &error) { _, outStatus in
             outStatus.pointee = .haveData
-            return inBuffer
+            return buffer
         }
 
         if let error = error { throw error }

@@ -391,11 +391,12 @@ struct TranscribeView: View {
             let result = try await appState.transcriptionEngine.transcribe(
                 audioAt: audioURL,
                 language: selectedLanguage == "auto" ? nil : selectedLanguage,
-                task: selectedTask
-            ) { progress in
-                appState.transcriptionProgress = progress.fractionComplete
-                appState.currentPartialText = progress.currentText
-            }
+                task: selectedTask,
+                progressHandler: { progress in
+                    appState.transcriptionProgress = progress.fraction
+                    appState.currentPartialText = progress.phase
+                }
+            )
             
             transcriptionResult = result
             
