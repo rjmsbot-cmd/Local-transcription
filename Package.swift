@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "WhisperLocalCore", targets: ["WhisperLocalCore"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Argonormal/WhisperKit.git", from: "0.9.0")
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0")
     ],
     targets: [
         .target(
