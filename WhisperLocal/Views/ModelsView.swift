@@ -93,7 +93,7 @@ struct ModelsView: View {
                 ForEach(downloadedModels) { model in
                     HStack(spacing: 12) {
                         Image(systemName: model.isDefault ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(model.isDefault ? .blue : .tertiary)
+                            .foregroundStyle(model.isDefault ? .blue : .gray.opacity(0.3))
                             .font(.title3)
                         
                         VStack(alignment: .leading, spacing: 3) {
@@ -155,7 +155,7 @@ struct ModelsView: View {
                             Label(model.likes.abbreviated, systemImage: "heart")
                         }
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.gray.opacity(0.3))
                     }
                     
                     Spacer()
