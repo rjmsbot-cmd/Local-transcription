@@ -13,11 +13,12 @@ jobs:
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project WhisperLocal.xcodeproj -scheme WhisperLocal
 
-      - name: Build
+      - name: Build for generic iOS
         run: |
           xcodebuild -project WhisperLocal.xcodeproj \
             -scheme WhisperLocal \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -configuration Release \
             -derivedDataPath build \
             CODE_SIGN_IDENTITY="-" \
