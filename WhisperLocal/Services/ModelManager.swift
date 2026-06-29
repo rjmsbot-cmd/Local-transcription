@@ -54,7 +54,7 @@ actor ModelManager {
             throw HFError.noCompatibleFile
         }
         
-        let stream = hfService.downloadFileWithProgress(repoId: hfModel.modelId, fileName: file.path)
+        let stream = await hfService.downloadFileWithProgress(repoId: hfModel.modelId, fileName: file.path)
         
         let modelsDir = modelsDirectory
         let safeName = file.path.replacingOccurrences(of: "/", with: "_")

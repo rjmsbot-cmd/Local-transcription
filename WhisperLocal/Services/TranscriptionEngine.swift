@@ -14,7 +14,7 @@ enum TranscriptionTask: String, CaseIterable, Identifiable {
 }
 
 struct TranscriptionProgress {
-    let taskId: UUID
+    let taskId: String
     let fraction: Double
     let phase: String
 }
@@ -37,17 +37,6 @@ class TranscriptionEngine {
     private let whisperProcessor = WhisperProcessor()
     private var whisperProcessorLoaded = false
     private var loadedModelPath: String?
-    private var modelManager: ModelManager?
-
-    func setModelManager(_ manager: ModelManager) {
-        self.modelManager = manager
-    }
-
-    func loadModel(path: String) async throws {
-        try await whisperProcessor.loadModel(path: path)
-        loadedModelPath = path
-        whisperProcessorLoaded = true
-    }
 
     func loadModel(at path: String) async throws {
         try await whisperProcessor.loadModel(path: path)
@@ -66,7 +55,10 @@ class TranscriptionEngine {
         let duration = try await MainActor.run { try audioProcessor.getAudioDuration(at: url) }
 
         if duration > 1800 {
-            return try await transcribeChunked(url: url, language: language, task: task, totalDuration: duration, progressCallback: progressCallback)
+            return try await transcribeChunked(
+                url: url, language: language, task: task, totalDuration: duration,
+                progressHandler: progressHandler
+            )
         }
 
         await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.1, phase: "Loading audio..."))
