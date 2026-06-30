@@ -7,9 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		100001 /* TranscriptionTypes.swift.build */ = {isa = PBXBuildFile; fileRef = C0A001 /* TranscriptionTypes.swift */;};
-		100002 /* DocumentPickerService.swift.build */ = {isa = PBXBuildFile; fileRef = C0A002 /* DocumentPickerService.swift */;};
-		100003 /* DocumentPickerSheet.swift.build */ = {isa = PBXBuildFile; fileRef = C0A003 /* DocumentPickerSheet.swift */;};
 		A1000001 /* WhisperLocalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001; };
 		A1000002 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002; };
 		A1000003 /* DownloadedModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003; };
@@ -27,9 +24,9 @@
 		A100000F /* ExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F; };
 		A1000010 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010; };
 		A1000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000011; };
-		D0A001 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A001 /* TranscriptionTypes.swift */};
-		D0A002 /* DocumentPickerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A002 /* DocumentPickerService.swift */};
-		D0A003 /* DocumentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A003 /* DocumentPickerSheet.swift */};
+		A9500003 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500002 /* TranscriptionTypes.swift */;};
+		A9500005 /* DocumentPickerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500004 /* DocumentPickerService.swift */;};
+		A9500007 /* DocumentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500006 /* DocumentPickerSheet.swift */;};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -49,6 +46,9 @@
 		A200000E /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		A200000F /* ExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheet.swift; sourceTree = "<group>"; };
 		A2000010 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A9500002 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>";};
+		A9500004 /* DocumentPickerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerService.swift; sourceTree = "<group>";};
+		A9500006 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerSheet.swift; sourceTree = "<group>";};
 		A2000012 /* Preview Content */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Preview Content"; sourceTree = "<group>"; };
 		A3000001 /* WhisperLocal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhisperLocal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -92,6 +92,8 @@
 				A2000002 /* Transcription.swift */,
 				A2000003 /* DownloadedModel.swift */,
 				A2000004 /* HFModel.swift */,
+			
+				A9500002 /* TranscriptionTypes.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -105,13 +107,9 @@
 				A200000E /* HistoryView.swift */,
 				A200000F /* ExportSheet.swift */,
 				A2000010 /* SettingsView.swift */,
+			
+				A9500006 /* DocumentPickerSheet.swift */,
 			);
-				C0A001 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TranscriptionTypes.swift"; sourceTree = "<group>";};
-				C0A002 /* DocumentPickerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DocumentPickerService.swift"; sourceTree = "<group>";};
-				C0A003 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DocumentPickerSheet.swift"; sourceTree = "<group>";};
-		C0A001 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TranscriptionTypes.swift"; sourceTree = "<group>";};
-		C0A002 /* DocumentPickerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DocumentPickerService.swift"; sourceTree = "<group>";};
-		C0A003 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DocumentPickerSheet.swift"; sourceTree = "<group>";};
 			path = Views;
 			sourceTree = "<group>";
 		};
@@ -124,6 +122,8 @@
 				A200000A /* WhisperProcessor.swift */,
 				A2000008 /* ModelManager.swift */,
 				A2000009 /* ExportService.swift */,
+			
+				A9500004 /* DocumentPickerService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -161,9 +161,6 @@
 		};
 /* End PBXNativeTarget section */
 
-		C0A001 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TranscriptionTypes.swift"; sourceTree = "<group>";};
-		C0A002 /* DocumentPickerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DocumentPickerService.swift"; sourceTree = "<group>";};
-		C0A003 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DocumentPickerSheet.swift"; sourceTree = "<group>";};
 /* Begin PBXProject section */
 		A0000001 /* Project object */ = {
 			isa = PBXProject;
@@ -222,6 +219,10 @@
 				A100000E /* HistoryView.swift in Sources */,
 				A100000F /* ExportSheet.swift in Sources */,
 				A1000010 /* SettingsView.swift in Sources */,
+			
+				A9500003 /* TranscriptionTypes.swift in Sources */,
+				A9500005 /* DocumentPickerService.swift in Sources */,
+				A9500007 /* DocumentPickerSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,14 +243,12 @@
 				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
-				C0A001 /* TranscriptionTypes.swift */,
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
-				C0A002 /* DocumentPickerService.swift */,
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
@@ -258,7 +257,6 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				C0A003 /* DocumentPickerSheet.swift */,
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
@@ -311,9 +309,6 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
-		D0A001 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A001 /* TranscriptionTypes.swift */};
-		D0A002 /* DocumentPickerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A002 /* DocumentPickerService.swift */};
-		D0A003 /* DocumentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A003 /* DocumentPickerSheet.swift */};
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -365,9 +360,6 @@
 				DEVELOPMENT_ASSET_PATHS = "\"WhisperLocal/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				D0A001 /* TranscriptionTypes.swift in Sources */,
-				D0A002 /* DocumentPickerService.swift in Sources */,
-				D0A003 /* DocumentPickerSheet.swift in Sources */,
 				INFOPLIST_FILE = WhisperLocal/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Whisper Local";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
