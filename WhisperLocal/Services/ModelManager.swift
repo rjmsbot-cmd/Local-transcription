@@ -54,7 +54,7 @@ actor ModelManager {
         _ hfModel: HFModel,
         variant: ModelVariant
     ) async throws -> (DownloadedModel, AsyncThrowingStream<Double, Error>) {
-        let stream = hfService.downloadFileWithProgress(repoId: hfModel.modelId, fileName: variant.fileName)
+        let stream = await hfService.downloadFileWithProgress(repoId: hfModel.modelId, fileName: variant.fileName)
 
         let modelsDir = modelsDirectory
         let safeName = variant.fileName.replacingOccurrences(of: "/", with: "_")

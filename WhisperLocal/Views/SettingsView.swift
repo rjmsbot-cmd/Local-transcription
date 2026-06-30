@@ -10,25 +10,76 @@ struct SettingsView: View {
     @AppStorage("hapticEnabled") private var hapticEnabled = true
     @State private var showAbout = false
     
+    private var isModelLoaded: Bool {
+        appState.transcriptionEngine.whisperProcessorLoaded
+    }
+    private var modelMemoryFormatted: String {
+        appState.transcriptionEngine.modelMemoryFormatted
+    }
+    
     var body: some View {
         NavigationStack {
             List {
+                // Model Status
+                Section("Model Status") {
+                    HStack(spacing: 12) {
+                        // Live indicator
+                        ZStack {
+                            Circle()
+                                .fill(isModelLoaded ? Color.green : Color.gray.opacity(0.4))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: isModelLoaded ? "checkmark" : "circle")
+                                .font(.title3)
+                                .foregroundStyle(.white)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(isModelLoaded ? "Model in Memory" : "No Model Loaded")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(isModelLoaded ? .green : .secondary)
+                            
+                            if let name = appState.activeModelName {
+                                Text(name)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            HStack(spacing: 6) {
+                                Label(modelMemoryFormatted, systemImage: "memorychip")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                
+                                if isModelLoaded {
+                                    Text("• Neural Engine ready")
+                                        .font(.caption2)
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        if isModelLoaded {
+                            Button {
+                                unloadModel()
+                            } label: {
+                                Label("Unload", systemImage: "xmark.circle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        }
+                    }
+                }
+                
                 // Status
-                Section {
+                Section("System") {
                     StatusRow(
                         icon: "brain.head.profile",
                         iconColor: .purple,
                         title: "Neural Engine",
                         subtitle: "A17 Pro • 16-core • 35 TOPS",
                         status: .active
-                    )
-                    
-                    StatusRow(
-                        icon: "cpu",
-                        iconColor: .blue,
-                        title: "Active Model",
-                        subtitle: appState.activeModelName ?? "None",
-                        status: appState.activeModelName != nil ? .active : .warning
                     )
                     
                     StatusRow(
@@ -54,8 +105,6 @@ struct SettingsView: View {
                         subtitle: "\(transcriptions.count) saved",
                         status: .neutral
                     )
-                } header: {
-                    Text("Status")
                 }
                 
                 // Preferences
@@ -89,7 +138,7 @@ struct SettingsView: View {
                 // Footer
                 Section {
                     VStack(spacing: 6) {
-                        Text("Whisper Local v1.0")
+                        Text("Whisper Local v1.1")
                             .font(.footnote.weight(.medium))
                         Text("Optimized for iPhone 15 Pro with Apple Neural Engine")
                             .font(.caption)
@@ -107,6 +156,11 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .sheet(isPresented: $showAbout) { AboutView() }
         }
+    }
+    
+    private func unloadModel() {
+        appState.transcriptionEngine.unloadModel()
+        appState.activeModelName = nil
     }
 }
 
@@ -173,7 +227,7 @@ struct AboutView: View {
                     
                     Text("Whisper Local")
                         .font(.title.weight(.bold))
-                    Text("Version 1.0")
+                    Text("Version 1.1")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     
@@ -186,6 +240,8 @@ struct AboutView: View {
                         FeatureRow(icon: "brain.head.profile", text: "Neural Engine optimized (35 TOPS)")
                         FeatureRow(icon: "lock.shield.fill", text: "100% on-device — zero network calls for inference")
                         FeatureRow(icon: "icloud.and.arrow.down", text: "Download models from HuggingFace")
+                        FeatureRow(icon: "memorychip", text: "Load/unload models to manage memory")
+                        FeatureRow(icon: "note.text", text: "Browse audio from Files, Notes, iCloud")
                         FeatureRow(icon: "doc.text", text: "Export to SRT, VTT, TXT, JSON, CSV, Markdown")
                         FeatureRow(icon: "clock.arrow.circlepath", text: "Process audio files of any length")
                         FeatureRow(icon: "globe", text: "15+ languages supported")

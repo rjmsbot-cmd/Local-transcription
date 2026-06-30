@@ -24,10 +24,29 @@ struct ModelsView: View {
 
     @State private var errorMessage: String?
     @State private var showError = false
+    
+    @State private var modelLoadState: ModelLoadState = .idle
+
+    // Computed
+    private var isModelLoaded: Bool {
+        appState.transcriptionEngine.whisperProcessorLoaded
+    }
+    private var loadedModelName: String? {
+        appState.transcriptionEngine.loadedModelPath.flatMap { path in
+            downloadedModels.first(where: { $0.localPath == path })?.name
+        } ?? appState.activeModelName
+    }
+    
+    private var modelMemoryFormatted: String {
+        appState.transcriptionEngine.modelMemoryFormatted
+    }
 
     var body: some View {
         NavigationStack {
             List {
+                // Model status section
+                modelStatusSection
+                
                 downloadedSection
 
                 if isSearching {
@@ -83,6 +102,69 @@ struct ModelsView: View {
             .task {
                 if searchResults.isEmpty { await loadPopular() }
             }
+        }
+    }
+    
+    // MARK: - Model Status Section
+    
+    private var modelStatusSection: some View {
+        Section("Model in Memory") {
+            HStack(spacing: 12) {
+                // Status indicator
+                ZStack {
+                    Circle()
+                        .fill(isModelLoaded ? Color.green : Color.gray.opacity(0.4))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: isModelLoaded ? "checkmark" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isModelLoaded ? "Model Loaded" : "No Model Loaded")
+                        .font(.headline)
+                        .foregroundStyle(isModelLoaded ? .green : .secondary)
+                    
+                    if let name = loadedModelName {
+                        Text(name)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    HStack(spacing: 8) {
+                        Label(modelMemoryFormatted, systemImage: "memorychip")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        if isModelLoaded {
+                            Text("•")
+                                .foregroundStyle(.tertiary)
+                            Text("Neural Engine ready")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+                
+                Spacer()
+                
+                if isModelLoaded {
+                    Button {
+                        unloadModel()
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.red)
+                            Text("Unload")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
         }
     }
 
@@ -173,45 +255,99 @@ struct ModelsView: View {
                 }
             } else {
                 ForEach(downloadedModels) { model in
-                    HStack(spacing: 12) {
-                        Image(systemName: model.isDefault ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(model.isDefault ? .blue : .gray.opacity(0.3))
-                            .font(.title3)
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(model.name)
-                                .font(.headline)
-                            HStack(spacing: 6) {
-                                Text(model.repoId)
-                                    .lineLimit(1)
-                                Text("•")
-                                Text(model.fileSizeFormatted)
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        if downloadingModelId == model.id.uuidString {
-                            ProgressView(value: downloadProgress)
-                                .frame(width: 60)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { setDefault(model) }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            modelToDelete = model
-                            showDeleteAlert = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
+                    modelRow(model)
                 }
             }
         } header: {
             Text("Downloaded (\(downloadedModels.count))")
+        }
+    }
+    
+    private func modelRow(_ model: DownloadedModel) -> some View {
+        let isCurrentlyLoaded = isModelLoaded && loadedModelName == model.name
+        
+        return HStack(spacing: 12) {
+            Image(systemName: model.isDefault ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(model.isDefault ? .blue : .gray.opacity(0.3))
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.name)
+                    .font(.headline)
+                HStack(spacing: 6) {
+                    Text(model.repoId)
+                        .lineLimit(1)
+                    Text("•")
+                    Text(model.fileSizeFormatted)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                
+                if isCurrentlyLoaded {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                        Text("Active")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+
+            Spacer()
+
+            if downloadingModelId == model.id.uuidString {
+                ProgressView(value: downloadProgress)
+                    .frame(width: 60)
+            } else {
+                VStack(spacing: 6) {
+                    // Load / Unload button
+                    if isCurrentlyLoaded {
+                        Button {
+                            unloadModel()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Unload model")
+                    } else {
+                        Button {
+                            Task { await setDefaultAndLoad(model) }
+                        } label: {
+                            Image(systemName: "play.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.green)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Load model")
+                    }
+                    
+                    // Set default button
+                    if !model.isDefault {
+                        Button {
+                            setDefault(model)
+                        } label: {
+                            Image(systemName: "star")
+                                .font(.caption)
+                                .foregroundStyle(.yellow)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Set as default")
+                    }
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                modelToDelete = model
+                showDeleteAlert = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
 
@@ -340,10 +476,49 @@ struct ModelsView: View {
         model.isDefault = true
     }
 
+    private func setDefaultAndLoad(_ model: DownloadedModel) async {
+        setDefault(model)
+        await loadModel(model)
+    }
+
+    private func loadModel(_ model: DownloadedModel) async {
+        modelLoadState = .loading
+        
+        do {
+            try await appState.transcriptionEngine.loadModel(at: model.localPath)
+            appState.activeModelName = model.name
+            modelLoadState = .loaded
+        } catch {
+            modelLoadState = .error
+            print("Failed to load model: \(error)")
+        }
+    }
+
+    private func unloadModel() {
+        modelLoadState = .unloading
+        appState.transcriptionEngine.unloadModel()
+        appState.activeModelName = nil
+        modelLoadState = .idle
+    }
+
     private func deleteModel(_ model: DownloadedModel) {
+        // If this model is loaded, unload it first
+        if isModelLoaded, loadedModelName == model.name {
+            unloadModel()
+        }
         try? appState.modelManager.deleteModel(model)
         modelContext.delete(model)
     }
+}
+
+// MARK: - Model Load State
+
+enum ModelLoadState {
+    case idle
+    case loading
+    case loaded
+    case unloading
+    case error
 }
 
 // MARK: - Int Extension
