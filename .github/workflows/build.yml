@@ -20,6 +20,15 @@ jobs:
         with:
           xcode-version: '16.2' # Selecciona automáticamente Xcode 16.2 o la versión de Xcode 16 disponible
 
+      - name: Install iOS Runtime
+        run: |
+          xcodebuild -runFirstLaunch
+          # Download iOS 18.2 simulator runtime if not present
+          if ! xcrun simctl list devices | grep -q "iOS 18.2"; then
+            echo "Installing iOS 18.2 runtime..."
+            xcodebuild -downloadPlatform iOS
+          fi
+
       - name: Clean DerivedData and Build Cache
         run: |
           rm -rf ~/Library/Developer/Xcode/DerivedData/WhisperLocal*
