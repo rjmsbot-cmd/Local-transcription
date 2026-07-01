@@ -14,25 +14,20 @@ jobs:
 
       - name: Select Xcode
         run: |
-          # Prefer Xcode 16.2, fallback to 16.x, then list available
           if [ -d "/Applications/Xcode_16.2.app" ]; then
             sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           elif [ -d "/Applications/Xcode_16.app" ]; then
             sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
           else
-            echo "Available Xcode versions:"
             ls -d /Applications/Xcode*.app 2>/dev/null || echo "No Xcode found"
             exit 1
           fi
           xcodebuild -version
 
-      - name: Resolve Swift Packages
+      - name: Clean DerivedData
         run: |
-          xcodebuild -resolvePackageDependencies \
-            -project WhisperLocal.xcodeproj \
-            -scheme WhisperLocal \
-            -clonedSourcePackagesDirPath .swiftpm-checkout
-        timeout-minutes: 10
+          rm -rf ~/Library/Developer/Xcode/DerivedData/WhisperLocal*
+          rm -rf .swiftpm .build
 
       - name: Build for iOS
         run: |
@@ -46,28 +41,23 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            ONLY_ACTIVE_ARCH=NO \
-            -quiet
-        timeout-minutes: 20
+            ONLY_ACTIVE_ARCH=NO
+        timeout-minutes: 25
 
       - name: Verify build output
         run: |
-          echo "Build output:"
           ls -la build/Build/Products/Release-iphoneos/
           test -d "build/Build/Products/Release-iphoneos/WhisperLocal.app" || {
             echo "ERROR: App not found!"
             exit 1
           }
-          echo "App verified ✓"
 
       - name: Create IPA
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/WhisperLocal.app Payload/
           cd Payload && zip -r ../WhisperLocal.ipa WhisperLocal.app
-          cd ..
           echo "IPA size: $(du -h WhisperLocal.ipa | cut -f1)"
-          echo "IPA created ✓"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
