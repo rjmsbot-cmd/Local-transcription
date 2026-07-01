@@ -27,7 +27,7 @@ final class DocumentPickerService: ObservableObject {
         }
         
         if let rootVC = windowScene.windows.first?.rootViewController {
-            let presentingVC = rootVC.presentedViewController.isPresented ? rootVC.presentedViewController : rootVC
+            let presentingVC = (rootVC.presentedViewController != nil) ? rootVC.presentedViewController! : rootVC
             presentingVC.present(picker, animated: true)
             isPickerPresented = true
         }
@@ -68,5 +68,5 @@ private class DocumentPickerDelegateHandler: NSObject, UIDocumentPickerDelegate 
 // MARK: - Audio Content Types
 
 let audioContentTypes: [UTType] = [
-    .mp3, .wav, .m4a, .aac, .flac, .audio
+    .mp3, .wav, UTType(filenameExtension: "m4a")!, UTType(filenameExtension: "aac")!, UTType(filenameExtension: "flac")!, .audio
 ]

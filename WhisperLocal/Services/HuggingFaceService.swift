@@ -23,11 +23,11 @@ actor HuggingFaceService {
             .replacingOccurrences(of: "../", with: "")
             .replacingOccurrences(of: "..\\", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/\\ \t\n\r"))
-        guard CharacterSet.alphanumeric
+        guard CharacterSet.alphanumerics
             .union(CharacterSet(charactersIn: "._-"))
             .isSuperset(of: CharacterSet(charactersIn: sanitized)) else {
             return sanitized.components(
-                separatedBy: CharacterSet.alphanumeric
+                separatedBy: CharacterSet.alphanumerics
                     .union(CharacterSet(charactersIn: "._-"))
             ).joined(separator: "_")
         }
@@ -163,7 +163,7 @@ actor HuggingFaceService {
 
                     for try await byte in bytes {
                         accumulator.append(byte)
-                        receivedBytes += Int64(byte.count)
+                        receivedBytes += 1
 
                         if accumulator.count >= chunkSize {
                             if FileManager.default.fileExists(atPath: destination.path) {
