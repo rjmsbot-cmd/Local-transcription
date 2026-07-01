@@ -33,7 +33,7 @@ jobs:
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath build \
-            -destination 'generic/platform=iOS' \
+            -destination 'generic/platform=iOS,arch=arm64' \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
