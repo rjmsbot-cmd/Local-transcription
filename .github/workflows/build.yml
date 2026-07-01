@@ -1,49 +1,38 @@
 name: Build IPA
-on: workflow_dispatch
+on:
+  workflow_dispatch
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Xcode
+      - name: Select Xcode
         run: |
-          # Use the latest available Xcode 16 if exact version not found
-          if [ -d "/Applications/Xcode_16.app" ]; then
+          # Prefer Xcode 16.2, fallback to 16.x, then list available
+          if [ -d "/Applications/Xcode_16.2.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_16.app" ]; then
             sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
-          elif [ -d "/Applications/Xcode_16.0.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer
           else
-            # Fallback: use whatever Xcode is installed
-            ls /Applications/Xcode*.app || true
-            sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer 2>/dev/null || true
+            echo "Available Xcode versions:"
+            ls -d /Applications/Xcode*.app 2>/dev/null || echo "No Xcode found"
+            exit 1
           fi
           xcodebuild -version
-          xcodebuild -showsdks 2>&1 | grep -i "iphoneos" | head -5
 
-      - name: Install iOS Runtime
-        run: |
-          if ! xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
-            echo "iOS SDK not found, downloading..."
-            xcodebuild -downloadPlatform iOS 2>&1 || true
-          fi
-          xcrun simctl list runtimes 2>/dev/null | head -5
-
-      - name: Resolve packages
+      - name: Resolve Swift Packages
         run: |
           xcodebuild -resolvePackageDependencies \
             -project WhisperLocal.xcodeproj \
-            -scheme WhisperLocal
-
-      - name: Clean build folder
-        run: |
-          rm -rf build
-          xcodebuild clean \
-            -project WhisperLocal.xcodeproj \
             -scheme WhisperLocal \
-            -configuration Release \
-            -derivedDataPath build 2>&1 || true
+            -clonedSourcePackagesDirPath .swiftpm-checkout
+        timeout-minutes: 10
 
       - name: Build for iOS
         run: |
@@ -57,21 +46,28 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            -allowProvisioningUpdates
+            ONLY_ACTIVE_ARCH=NO \
+            -quiet
+        timeout-minutes: 20
 
       - name: Verify build output
         run: |
-          echo "Build artifacts:"
+          echo "Build output:"
           ls -la build/Build/Products/Release-iphoneos/
-          test -d "build/Build/Products/Release-iphoneos/WhisperLocal.app" || (echo "App not found!" && exit 1)
-          echo "Build verified successfully."
+          test -d "build/Build/Products/Release-iphoneos/WhisperLocal.app" || {
+            echo "ERROR: App not found!"
+            exit 1
+          }
+          echo "App verified ✓"
 
       - name: Create IPA
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/WhisperLocal.app Payload/
-          zip -r WhisperLocal.ipa Payload
+          cd Payload && zip -r ../WhisperLocal.ipa WhisperLocal.app
+          cd ..
           echo "IPA size: $(du -h WhisperLocal.ipa | cut -f1)"
+          echo "IPA created ✓"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -79,3 +75,11 @@ jobs:
           name: WhisperLocal-IPA
           path: WhisperLocal.ipa
           retention-days: 14
+
+      - name: Upload Build Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build/Logs/
+          retention-days: 7

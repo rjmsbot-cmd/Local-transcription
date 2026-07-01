@@ -78,6 +78,11 @@ class WhisperProcessor {
 
         defer { vDSP_destroy_fftsetup(fftSetup) }
 
+        // FIX: Allocate FFT buffers outside the loop (memory leak fix)
+        var realp = [Float](repeating: 0, count: nFFT / 2)
+        var imagp = [Float](repeating: 0, count: nFFT / 2)
+        var magnitudes = [Float](repeating: 0, count: nFFT / 2 + 1)
+
         for frame in 0..<nFrames {
             let offset = frame * hopLength
             var windowedSamples = [Float](repeating: 0, count: nFFT)
@@ -89,8 +94,6 @@ class WhisperProcessor {
                 }
             }
 
-            var realp = [Float](repeating: 0, count: nFFT / 2)
-            var imagp = [Float](repeating: 0, count: nFFT / 2)
             var splitComplex = DSPSplitComplex(realp: &realp, imagp: &imagp)
 
             windowedSamples.withUnsafeBufferPointer { ptr in
@@ -100,8 +103,6 @@ class WhisperProcessor {
             }
 
             vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(kFFTDirection_Forward))
-
-            var magnitudes = [Float](repeating: 0, count: nFFT / 2 + 1)
             vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(nFFT / 2 + 1))
 
             for mel in 0..<nMels {

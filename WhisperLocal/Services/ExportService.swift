@@ -151,7 +151,10 @@ struct ExportService {
             let escaped = seg.text.replacingOccurrences(of: "\"", with: "\"\"")
             csv += "\(seg.id),\(String(format: "%.3f", seg.start)),\(String(format: "%.3f", seg.end)),\(String(format: "%.3f", seg.end - seg.start)),\"\(escaped)\"\n"
         }
-        return csv.data(using: .utf8) ?? Data()
+        // FIX: UTF-8 BOM for Excel compatibility
+        let bom = "\u{FEFF}"
+        let csvWithBom = bom + csv
+        return csvWithBom.data(using: .utf8) ?? Data()
     }
     
     // MARK: - Markdown

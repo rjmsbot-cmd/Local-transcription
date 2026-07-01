@@ -56,9 +56,9 @@ actor ModelManager {
     ) async throws -> (DownloadedModel, AsyncThrowingStream<Double, Error>) {
         let stream = await hfService.downloadFileWithProgress(repoId: hfModel.modelId, fileName: variant.fileName)
 
-        let modelsDir = modelsDirectory
+        // FIX: Compute path after download to avoid race condition
         let safeName = variant.fileName.replacingOccurrences(of: "/", with: "_")
-        let localPath = modelsDir.appendingPathComponent(safeName).path
+        let localPath = modelsDirectory.appendingPathComponent(safeName).path
 
         let model = DownloadedModel(
             name: hfModel.displayName + " (\(variant.quantization))",

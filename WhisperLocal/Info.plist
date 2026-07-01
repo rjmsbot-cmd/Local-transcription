@@ -39,6 +39,10 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Whisper Local needs microphone access to record audio for transcription.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Whisper Local needs access to your music library to transcribe audio files.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Whisper Local needs access to save exported transcription files.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>

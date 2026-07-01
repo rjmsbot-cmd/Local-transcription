@@ -60,6 +60,9 @@ class TranscriptionEngine {
         await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.1, phase: "Loading audio..."))
         let (samples, _) = try audioProcessor.loadAudio(from: url)
         
+        // FIX: Check cancellation after loading audio
+        try Task.checkCancellation()
+        
         await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.3, phase: "Transcribing..."))
         let result = try await whisperProcessor.transcribe(samples: samples, language: language)
         
@@ -90,6 +93,9 @@ class TranscriptionEngine {
         var globalSegmentId = 0
         
         for (idx, chunk) in chunks.enumerated() {
+            // FIX: Check cancellation between chunks
+            try Task.checkCancellation()
+
             let chunkFrac = Double(idx) / Double(chunks.count)
             await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.1 + chunkFrac * 0.8, phase: "Chunk \(idx + 1)/\(chunks.count)..."))
             

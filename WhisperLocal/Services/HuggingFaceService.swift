@@ -15,6 +15,25 @@ actor HuggingFaceService {
         self.session = URLSession(configuration: config)
     }
 
+    // MARK: - URL Sanitization (Security)
+
+    private static func sanitizePathComponent(_ input: String) -> String {
+        let sanitized = input
+            .replacingOccurrences(of: "//", with: "/")
+            .replacingOccurrences(of: "../", with: "")
+            .replacingOccurrences(of: "..\\", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/\\ \t\n\r"))
+        guard CharacterSet.alphanumeric
+            .union(CharacterSet(charactersIn: "._-"))
+            .isSuperset(of: CharacterSet(charactersIn: sanitized)) else {
+            return sanitized.components(
+                separatedBy: CharacterSet.alphanumeric
+                    .union(CharacterSet(charactersIn: "._-"))
+            ).joined(separator: "_")
+        }
+        return sanitized
+    }
+
     // MARK: - Search
 
     func searchModels(query: String, limit: Int = 30) async throws -> [HFModel] {
@@ -144,7 +163,7 @@ actor HuggingFaceService {
 
                     for try await byte in bytes {
                         accumulator.append(byte)
-                        receivedBytes += 1
+                        receivedBytes += Int64(byte.count)
 
                         if accumulator.count >= chunkSize {
                             if FileManager.default.fileExists(atPath: destination.path) {
