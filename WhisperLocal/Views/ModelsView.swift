@@ -427,7 +427,7 @@ struct ModelsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 
-                if let likes = model.likes, likes > 0 {
+                if model.likes > 0 {
                     HStack(spacing: 2) {
                         Image(systemName: "heart.fill")
                             .font(.caption2)

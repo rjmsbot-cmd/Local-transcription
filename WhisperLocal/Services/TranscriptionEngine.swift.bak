@@ -10,14 +10,8 @@ final class TranscriptionEngine {
     var whisperProcessorLoaded: Bool { whisperProcessor != nil }
     var loadedModelPath: String? { currentModelPath }
     var modelMemoryFormatted: String {
-        guard whisperProcessor != nil else { return "N/A" }
-        return "~50 MB" // WhisperProcessor does not expose memory usage
-    var modelMemoryFormatted: String {
-        guard whisperProcessor != nil else { return "N/A" }
-        return "~50 MB" // WhisperProcessor does not expose memory usage
-    var modelMemoryFormatted: String {
-        guard whisperProcessor != nil else { return "N/A" }
-        return "~50 MB" // WhisperProcessor does not expose memory usage
+        guard let processor = whisperProcessor else { return "N/A" }
+        let bytes = processor.estimatedMemoryBytes
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
     
@@ -32,8 +26,7 @@ final class TranscriptionEngine {
         }
         
         do {
-            let processor = WhisperProcessor()
-            try await processor.loadModel(path: path)
+            let processor = try await WhisperProcessor.load(modelPath: path)
             whisperProcessor = processor
             currentModelPath = path
             print("[TranscriptionEngine] Model loaded: \(path)")
@@ -64,23 +57,14 @@ final class TranscriptionEngine {
             throw EngineError.noModelLoaded
         }
         
-        let samples = try AudioProcessor().loadAudio(from: audioURL).samples
-        let whisperResult = try await processor.transcribe(samples: samples, language: language)
-        
-        let segments: [Transcription.Segment] = whisperResult.segments.map { seg in
-            Transcription.Segment(
-                start: seg.start,
-                end: seg.end,
-                text: seg.text
-            )
-        }
-        
-        return TranscriptionResult(
-            text: whisperResult.text,
-            segments: segments,
-            duration: Double(samples.count) / 16000,
-            language: language ?? "auto"
+        let result = try await processor.transcribe(
+            audioURL: audioURL,
+            language: language,
+            task: task,
+            progressHandler: progressHandler
         )
+        
+        return result
     }
     
     // MARK: - Batch Transcription
@@ -99,7 +83,6 @@ final class TranscriptionEngine {
         
         for (index, url) in audioURLs.enumerated() {
             let fileProgress = TranscriptionProgress(
-                taskId: "batch_\(index)",
                 fraction: Double(index) / Double(audioURLs.count),
                 phase: "File \(index + 1)/\(audioURLs.count)"
             )
@@ -114,7 +97,6 @@ final class TranscriptionEngine {
                         let overallFraction = Double(index) / Double(audioURLs.count)
                         let phaseFraction = phaseProgress.fraction / Double(audioURLs.count)
                         progressHandler(TranscriptionProgress(
-                            taskId: "batch_\(index)",
                             fraction: overallFraction + phaseFraction,
                             phase: phaseProgress.phase
                         ))
@@ -127,7 +109,7 @@ final class TranscriptionEngine {
             }
         }
         
-        progressHandler(TranscriptionProgress(taskId: "batch_complete", fraction: 1.0, phase: "Complete"))
+        progressHandler(TranscriptionProgress(fraction: 1.0, phase: "Complete"))
         return results
     }
 }
