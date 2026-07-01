@@ -18,16 +18,15 @@ jobs:
       - name: Select Xcode Version
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.4' # Selecciona Xcode 16.4 (iOS 18.3 SDK compatible con runner)
+          xcode-version: '16.2'
 
-      - name: Install iOS Runtime
+      - name: Install iOS Simulator Runtime
         run: |
+          # List available runtimes
+          xcrun simctl list runtimes
+          # Install the iOS runtime matching the SDK
           xcodebuild -runFirstLaunch
-          # Download iOS 18.2 simulator runtime if not present
-          if ! xcrun simctl list devices | grep -q "iOS 18.2"; then
-            echo "Installing iOS 18.2 runtime..."
-            xcodebuild -downloadPlatform iOS
-          fi
+          xcodebuild -downloadPlatform iOS
 
       - name: Clean DerivedData and Build Cache
         run: |
@@ -42,14 +41,13 @@ jobs:
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath build \
-            -destination 'generic/platform=iOS,arch=arm64' \
+            -destination 'generic/platform=iOS' \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             ONLY_ACTIVE_ARCH=NO \
-            ENABLE_PREVIEWS=NO \
-            SWIFT_PREVIEWS_ENABLED=NO
+            ENABLE_PREVIEWS=NO
         timeout-minutes: 25
 
       - name: Verify build output
