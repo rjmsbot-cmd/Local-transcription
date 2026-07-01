@@ -6,29 +6,35 @@ struct RootTabView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
+            RecordView()
+                .tabItem {
+                    Label("Record", systemImage: "mic")
+                }
+                .tag(0)
+            
             TranscribeView()
                 .tabItem {
                     Label("Transcribe", systemImage: "waveform")
                 }
-                .tag(0)
+                .tag(1)
             
             ModelsView()
                 .tabItem {
                     Label("Models", systemImage: "cpu")
                 }
-                .tag(1)
+                .tag(2)
             
             HistoryView()
                 .tabItem {
                     Label("History", systemImage: "clock.arrow.circlepath")
                 }
-                .tag(2)
+                .tag(3)
             
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
-                .tag(3)
+                .tag(4)
         }
         .tint(.accentColor)
     }

@@ -1,123 +1,134 @@
 import Foundation
+import SwiftData
 
 @MainActor
-class TranscriptionEngine {
-    private var audioProcessor = AudioProcessor()
-    private var whisperProcessor = WhisperProcessor()
+final class TranscriptionEngine {
+    private var whisperProcessor: WhisperProcessor?
+    private var currentModelPath: String?
     
-    // MARK: - Public State (for UI status indicators)
-    var whisperProcessorLoaded: Bool = false
-    var loadedModelPath: String?
-    var estimatedMemoryBytes: Int64 = 0
-    
-    /// Human-readable memory estimate
+    // Public accessors for UI status
+    var whisperProcessorLoaded: Bool { whisperProcessor != nil }
+    var loadedModelPath: String? { currentModelPath }
     var modelMemoryFormatted: String {
-        guard estimatedMemoryBytes > 0 else { return "—" }
-        return ByteCountFormatter.string(fromByteCount: estimatedMemoryBytes, countStyle: .memory)
+        guard let processor = whisperProcessor else { return "N/A" }
+        let bytes = processor.estimatedMemoryBytes
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
     
-    // MARK: - Model Lifecycle
+    // MARK: - Model Loading
     
     func loadModel(at path: String) async throws {
-        whisperProcessor = WhisperProcessor()
-        try await whisperProcessor.loadModel(path: path)
-        loadedModelPath = path
-        whisperProcessorLoaded = true
+        // Unload existing model first
+        unloadModel()
         
-        // Estimate memory usage from file size
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-           let size = attrs[.size] as? Int64 {
-            estimatedMemoryBytes = size
+        guard FileManager.default.fileExists(atPath: path) else {
+            throw EngineError.modelFileNotFound(path)
+        }
+        
+        do {
+            let processor = try await WhisperProcessor.load(modelPath: path)
+            whisperProcessor = processor
+            currentModelPath = path
+            print("[TranscriptionEngine] Model loaded: \(path)")
+        } catch {
+            // Clean up on failure
+            whisperProcessor = nil
+            currentModelPath = nil
+            print("[TranscriptionEngine] Model load failed: \(error.localizedDescription)")
+            throw error
         }
     }
     
     func unloadModel() {
-        whisperProcessor = WhisperProcessor()
-        whisperProcessorLoaded = false
-        loadedModelPath = nil
-        estimatedMemoryBytes = 0
+        print("[TranscriptionEngine] Unloading model")
+        whisperProcessor = nil
+        currentModelPath = nil
     }
     
     // MARK: - Transcription
     
     func transcribe(
-        audioAt url: URL,
-        language: String? = nil,
-        task: TranscriptionTask = .transcribe,
-        progressHandler: @MainActor @escaping (TranscriptionProgress) -> Void
-    ) async throws -> TranscriptionResult {
-        guard whisperProcessorLoaded else { throw TranscriptionError.noModelLoaded }
-        
-        let duration = try audioProcessor.getAudioDuration(at: url)
-        
-        if duration > 1800 {
-            return try await transcribeChunked(
-                url: url, language: language, task: task, totalDuration: duration,
-                progressHandler: progressHandler
-            )
-        }
-        
-        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.1, phase: "Loading audio..."))
-        let (samples, _) = try audioProcessor.loadAudio(from: url)
-        
-        // FIX: Check cancellation after loading audio
-        try Task.checkCancellation()
-        
-        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.3, phase: "Transcribing..."))
-        let result = try await whisperProcessor.transcribe(samples: samples, language: language)
-        
-        let segments = result.segments.enumerated().map { i, seg in
-            Transcription.Segment(id: i, start: seg.start, end: seg.end, text: seg.text)
-        }
-        
-        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 1.0, phase: "Complete"))
-        
-        return TranscriptionResult(
-            text: result.text,
-            segments: segments,
-            duration: duration,
-            language: language ?? "en"
-        )
-    }
-    
-    private func transcribeChunked(
-        url: URL,
+        audioAt audioURL: URL,
         language: String?,
         task: TranscriptionTask,
-        totalDuration: TimeInterval,
-        progressHandler: @MainActor @escaping (TranscriptionProgress) -> Void
+        progressHandler: @MainActor (TranscriptionProgress) -> Void
     ) async throws -> TranscriptionResult {
-        let chunks = try audioProcessor.splitIntoChunks(at: url)
-        var allSegments: [Transcription.Segment] = []
-        var fullTextParts: [String] = []
-        var globalSegmentId = 0
-        
-        for (idx, chunk) in chunks.enumerated() {
-            // FIX: Check cancellation between chunks
-            try Task.checkCancellation()
-
-            let chunkFrac = Double(idx) / Double(chunks.count)
-            await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 0.1 + chunkFrac * 0.8, phase: "Chunk \(idx + 1)/\(chunks.count)..."))
-            
-            let (samples, _) = try audioProcessor.loadAudio(from: chunk.fileURL)
-            let result = try await whisperProcessor.transcribe(samples: samples, language: language)
-            
-            for seg in result.segments {
-                allSegments.append(Transcription.Segment(
-                    id: globalSegmentId, start: seg.start + chunk.startTime,
-                    end: seg.end + chunk.startTime, text: seg.text
-                ))
-                globalSegmentId += 1
-            }
-            fullTextParts.append(result.text)
+        guard let processor = whisperProcessor else {
+            throw EngineError.noModelLoaded
         }
         
-        audioProcessor.cleanupChunks(chunks)
-        await progressHandler(TranscriptionProgress(taskId: task.id, fraction: 1.0, phase: "Complete"))
-        
-        return TranscriptionResult(
-            text: fullTextParts.joined(separator: " "),
-            segments: allSegments, duration: totalDuration, language: language ?? "en"
+        let result = try await processor.transcribe(
+            audioURL: audioURL,
+            language: language,
+            task: task,
+            progressHandler: progressHandler
         )
+        
+        return result
+    }
+    
+    // MARK: - Batch Transcription
+    
+    func transcribeBatch(
+        audioURLs: [URL],
+        language: String?,
+        task: TranscriptionTask,
+        progressHandler: @MainActor (TranscriptionProgress) -> Void
+    ) async throws -> [TranscriptionResult] {
+        guard let processor = whisperProcessor else {
+            throw EngineError.noModelLoaded
+        }
+        
+        var results: [TranscriptionResult] = []
+        
+        for (index, url) in audioURLs.enumerated() {
+            let fileProgress = TranscriptionProgress(
+                fraction: Double(index) / Double(audioURLs.count),
+                phase: "File \(index + 1)/\(audioURLs.count)"
+            )
+            progressHandler(fileProgress)
+            
+            do {
+                let result = try await processor.transcribe(
+                    audioURL: url,
+                    language: language,
+                    task: task,
+                    progressHandler: { phaseProgress in
+                        let overallFraction = Double(index) / Double(audioURLs.count)
+                        let phaseFraction = phaseProgress.fraction / Double(audioURLs.count)
+                        progressHandler(TranscriptionProgress(
+                            fraction: overallFraction + phaseFraction,
+                            phase: phaseProgress.phase
+                        ))
+                    }
+                )
+                results.append(result)
+            } catch {
+                print("[TranscriptionEngine] Failed to transcribe \(url.lastPathComponent): \(error)")
+                // Continue with remaining files
+            }
+        }
+        
+        progressHandler(TranscriptionProgress(fraction: 1.0, phase: "Complete"))
+        return results
+    }
+}
+
+// MARK: - Engine Errors
+
+enum EngineError: LocalizedError {
+    case noModelLoaded
+    case modelFileNotFound(String)
+    case transcriptionFailed(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .noModelLoaded:
+            return "No model loaded. Please download and load a model first."
+        case .modelFileNotFound(let path):
+            return "Model file not found at: \(path)"
+        case .transcriptionFailed(let reason):
+            return "Transcription failed: \(reason)"
+        }
     }
 }

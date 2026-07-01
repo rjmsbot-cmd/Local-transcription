@@ -56,12 +56,16 @@ actor ModelManager {
     ) async throws -> (DownloadedModel, AsyncThrowingStream<Double, Error>) {
         let stream = await hfService.downloadFileWithProgress(repoId: hfModel.modelId, fileName: variant.fileName)
 
-        // FIX: Compute path after download to avoid race condition
+        // Compute the expected local path upfront
         let safeName = variant.fileName.replacingOccurrences(of: "/", with: "_")
         let localPath = modelsDirectory.appendingPathComponent(safeName).path
 
+        let displayName = variant.quantization != "Default"
+            ? hfModel.displayName + " (\(variant.quantization))"
+            : hfModel.displayName
+
         let model = DownloadedModel(
-            name: hfModel.displayName + " (\(variant.quantization))",
+            name: displayName,
             repoId: hfModel.modelId,
             fileName: variant.fileName,
             localPath: localPath,
@@ -74,10 +78,12 @@ actor ModelManager {
     // MARK: - Management
 
     func deleteModel(_ model: DownloadedModel) throws {
+        // Try direct path
         let url = URL(fileURLWithPath: model.localPath)
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+        // Try safe name path
         let alt = modelsDirectory.appendingPathComponent(model.fileName.replacingOccurrences(of: "/", with: "_"))
         if FileManager.default.fileExists(atPath: alt.path) {
             try FileManager.default.removeItem(at: alt)
@@ -92,5 +98,20 @@ actor ModelManager {
 
     func fileExists(_ model: DownloadedModel) -> Bool {
         FileManager.default.fileExists(atPath: model.localPath)
+    }
+    
+    func listLocalModels() -> [URL] {
+        var result: [URL] = []
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: modelsDirectory, includingPropertiesForKeys: nil) else {
+            return result
+        }
+        for url in contents {
+            let ext = url.pathExtension.lowercased()
+            if ["mlmodelc", "gguf", "gguuf", "bin", "pt", "onnx", "coreml"].contains(ext) ||
+               url.lastPathComponent.contains("mlmodelc") {
+                result.append(url)
+            }
+        }
+        return result
     }
 }

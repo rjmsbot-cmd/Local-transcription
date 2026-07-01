@@ -8,10 +8,12 @@ actor HuggingFaceService {
 
     init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForRequest = 60
         config.timeoutIntervalForResource = 7200
         config.httpMaximumConnectionsPerHost = 4
         config.waitsForConnectivity = true
+        // Allow cellular downloads
+        config.allowsCellularAccess = true
         self.session = URLSession(configuration: config)
     }
 
@@ -49,7 +51,8 @@ actor HuggingFaceService {
         let (data, response) = try await session.data(from: components.url!)
         try validateResponse(response)
         let all = try JSONDecoder().decode([HFModel].self, from: data)
-        return all.filter { $0.isWhisperCompatible }
+        // Don't filter - show all ASR models including non-Whisper ones
+        return all
     }
 
     func getPopularWhisperModels() async throws -> [HFModel] {
@@ -107,31 +110,24 @@ actor HuggingFaceService {
                modelFiles.first
     }
 
-    // MARK: - Download
+    // MARK: - Download (Streaming - no memory issues)
 
     func downloadFile(
         repoId: String,
         fileName: String,
         progressHandler: @MainActor @escaping (Double) -> Void
     ) async throws -> URL {
+        // Delegate to streaming download
+        let stream = downloadFileWithProgress(repoId: repoId, fileName: fileName)
+        
+        for try await progress in stream {
+            await progressHandler(progress)
+        }
+        
+        // Return the destination path
         let modelsDir = try modelsDirectory()
         let safeName = fileName.replacingOccurrences(of: "/", with: "_")
-        let destination = modelsDir.appendingPathComponent(safeName)
-
-        if FileManager.default.fileExists(atPath: destination.path) {
-            await progressHandler(1.0)
-            return destination
-        }
-
-        let downloadURL = URL(string: "\(downloadBase)/\(repoId)/resolve/main/\(fileName)")!
-        let (data, response) = try await session.data(from: downloadURL)
-        try validateResponse(response)
-
-        await progressHandler(0.9)
-        try data.write(to: destination)
-        await progressHandler(1.0)
-
-        return destination
+        return modelsDir.appendingPathComponent(safeName)
     }
 
     func downloadFileWithProgress(
@@ -145,6 +141,7 @@ actor HuggingFaceService {
                     let safeName = fileName.replacingOccurrences(of: "/", with: "_")
                     let destination = modelsDir.appendingPathComponent(safeName)
 
+                    // Skip if already downloaded
                     if FileManager.default.fileExists(atPath: destination.path) {
                         continuation.yield(1.0)
                         continuation.finish()
@@ -152,6 +149,8 @@ actor HuggingFaceService {
                     }
 
                     let downloadURL = URL(string: "\(self.downloadBase)/\(repoId)/resolve/main/\(fileName)")!
+                    
+                    // Use bytes stream for memory-efficient download
                     let (bytes, response) = try await self.session.bytes(from: downloadURL)
                     try self.validateResponse(response)
 
@@ -159,11 +158,11 @@ actor HuggingFaceService {
 
                     var receivedBytes: Int64 = 0
                     var accumulator = Data()
-                    let chunkSize = 1024 * 1024
+                    let chunkSize = 1024 * 512 // 512KB chunks
 
                     for try await byte in bytes {
                         accumulator.append(byte)
-                        receivedBytes += 1
+                        receivedBytes += Int64(byte.count)  // FIX: was += 1
 
                         if accumulator.count >= chunkSize {
                             if FileManager.default.fileExists(atPath: destination.path) {
@@ -179,10 +178,16 @@ actor HuggingFaceService {
                             if expectedBytes > 0 {
                                 let progress = Double(receivedBytes) / Double(expectedBytes)
                                 continuation.yield(min(progress, 0.99))
+                            } else {
+                                // No content-length, just report periodic progress
+                                if receivedBytes % (1024 * 1024 * 10) == 0 {
+                                    continuation.yield(0.5)
+                                }
                             }
                         }
                     }
 
+                    // Write remaining data
                     if !accumulator.isEmpty {
                         if FileManager.default.fileExists(atPath: destination.path) {
                             let handle = try FileHandle(forWritingTo: destination)
@@ -197,6 +202,14 @@ actor HuggingFaceService {
                     continuation.yield(1.0)
                     continuation.finish()
                 } catch {
+                    // Clean up partial download on error
+                    let modelsDir = try? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("WhisperModels", isDirectory: true)
+                    let safeName = fileName.replacingOccurrences(of: "/", with: "_")
+                    let destination = modelsDir?.appendingPathComponent(safeName)
+                    if let dest = destination, FileManager.default.fileExists(atPath: dest.path) {
+                        try? FileManager.default.removeItem(at: dest)
+                    }
                     continuation.finish(throwing: error)
                 }
             }
@@ -231,6 +244,7 @@ actor HuggingFaceService {
         case 200: return
         case 404: throw HFError.notFound
         case 429: throw HFError.rateLimited
+        case 401, 403: throw HFError.accessDenied
         default: throw HFError.invalidResponse(statusCode: http.statusCode)
         }
     }
@@ -321,6 +335,7 @@ enum HFError: LocalizedError {
     case invalidResponse(statusCode: Int)
     case notFound
     case rateLimited
+    case accessDenied
     case noCompatibleFile
 
     var errorDescription: String? {
@@ -328,6 +343,7 @@ enum HFError: LocalizedError {
         case .invalidResponse(let code): return "HuggingFace returned HTTP \(code)"
         case .notFound: return "Model or file not found on HuggingFace"
         case .rateLimited: return "Rate limited by HuggingFace. Try again in a minute."
+        case .accessDenied: return "Access denied. The model may require authentication."
         case .noCompatibleFile: return "No compatible model file found in this repository"
         }
     }

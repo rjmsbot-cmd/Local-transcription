@@ -12,6 +12,7 @@ struct ModelsView: View {
 
     @State private var downloadingModelId: String?
     @State private var downloadProgress: Double = 0
+    @State private var downloadingName: String = ""
 
     @State private var showDeleteAlert = false
     @State private var modelToDelete: DownloadedModel?
@@ -47,6 +48,11 @@ struct ModelsView: View {
                 // Model status section
                 modelStatusSection
                 
+                // Downloading progress (if active)
+                if downloadingModelId != nil {
+                    downloadingProgressSection
+                }
+
                 downloadedSection
 
                 if isSearching {
@@ -63,11 +69,11 @@ struct ModelsView: View {
                 }
 
                 if searchResults.isEmpty && !isSearching && !searchText.isEmpty {
-                    ContentUnavailableView("No Whisper models found", systemImage: "magnifyingglass", description: Text("Try searching for \"whisper-small\" or \"whisper-large-v3\""))
+                    ContentUnavailableView("No models found", systemImage: "magnifyingglass", description: Text("Try searching for \"whisper-small\", \"whisper-large-v3\", or \"qwen-asr\""))
                 }
             }
             .navigationTitle("Models")
-            .searchable(text: $searchText, prompt: "Search Whisper models (e.g. whisper-small)")
+            .searchable(text: $searchText, prompt: "Search models (e.g. whisper-small, qwen-asr)")
             .onSubmit(of: .search) { Task { await search() } }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -76,7 +82,7 @@ struct ModelsView: View {
                             Label("Search", systemImage: "magnifyingglass")
                         }
                         Button { Task { await loadPopular() } } label: {
-                            Label("Popular Models", systemImage: "flame")
+                            Label("Popular Whisper Models", systemImage: "flame")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -167,6 +173,26 @@ struct ModelsView: View {
             .padding(.vertical, 4)
         }
     }
+    
+    // MARK: - Downloading Progress Section
+    
+    private var downloadingProgressSection: some View {
+        Section("Downloading") {
+            HStack {
+                ProgressView(value: downloadProgress)
+                VStack(alignment: .leading) {
+                    Text(downloadingName)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    Text("\(Int(downloadProgress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        }
+    }
 
     // MARK: - Variant Picker Sheet
 
@@ -227,7 +253,7 @@ struct ModelsView: View {
                         } header: {
                             Text("\(selectedModel?.displayName ?? "Model") — \(availableVariants.count) variants")
                         } footer: {
-                            Text("⚡ Core ML uses the Neural Engine for best performance on iPhone 15 Pro. GGUF/ONNX run on CPU.")
+                            Text("⚡ Core ML uses the Neural Engine for best performance. GGUF/ONNX run on CPU.")
                         }
                     }
                 }
@@ -288,7 +314,7 @@ struct ModelsView: View {
                         Image(systemName: "checkmark.seal.fill")
                             .font(.caption2)
                             .foregroundStyle(.green)
-                        Text("Active")
+                        Text("Loaded in memory")
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }
@@ -296,111 +322,148 @@ struct ModelsView: View {
             }
 
             Spacer()
-
-            if downloadingModelId == model.id.uuidString {
-                ProgressView(value: downloadProgress)
-                    .frame(width: 60)
-            } else {
-                VStack(spacing: 6) {
-                    // Load / Unload button
-                    if isCurrentlyLoaded {
-                        Button {
-                            unloadModel()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.red)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Unload model")
-                    } else {
-                        Button {
-                            Task { await setDefaultAndLoad(model) }
-                        } label: {
-                            Image(systemName: "play.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.green)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Load model")
+            
+            // Action buttons
+            Menu {
+                // Set as default
+                if !model.isDefault {
+                    Button {
+                        setDefault(model)
+                    } label: {
+                        Label("Set Default", systemImage: "checkmark.circle")
                     }
-                    
-                    // Set default button
-                    if !model.isDefault {
-                        Button {
-                            setDefault(model)
-                        } label: {
-                            Image(systemName: "star")
-                                .font(.caption)
-                                .foregroundStyle(.yellow)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Set as default")
+                } else {
+                    Button {
+                        // Already default
+                    } label: {
+                        Label("Default", systemImage: "checkmark.circle.fill")
                     }
+                    .disabled(true)
                 }
-            }
-        }
-        .contentShape(Rectangle())
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                modelToDelete = model
-                showDeleteAlert = true
+                
+                // Load model
+                if !isCurrentlyLoaded {
+                    Button {
+                        Task { await setDefaultAndLoad(model) }
+                    } label: {
+                        Label("Load Model", systemImage: "arrow.up.right.circle")
+                    }
+                } else {
+                    Button {
+                        // Already loaded
+                    } label: {
+                        Label("Loaded", systemImage: "checkmark.seal.fill")
+                    }
+                    .disabled(true)
+                }
+                
+                Divider()
+                
+                // Delete
+                Button {
+                    modelToDelete = model
+                    showDeleteAlert = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .foregroundStyle(.red)
             } label: {
-                Label("Delete", systemImage: "trash")
+                Image(systemName: "ellipsis.circle")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
+            .disabled(downloadingModelId != nil)
         }
+        .padding(.vertical, 4)
     }
 
-    // MARK: - Search Results
+    // MARK: - Search Results Section
 
     private var searchResultsSection: some View {
         Section {
             ForEach(searchResults) { model in
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(model.displayName)
-                            .font(.headline)
-                            .lineLimit(1)
-                        Text(model.modelId)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        HStack(spacing: 8) {
-                            if let author = model.author {
-                                Text("@\(author)")
-                            }
-                            Label(model.downloads.abbreviated, systemImage: "arrow.down")
-                            Label(model.likes.abbreviated, systemImage: "heart")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.gray)
-                    }
-
-                    Spacer()
-
-                    if downloadingModelId == model.id {
-                        ProgressView(value: downloadProgress)
-                            .frame(width: 50)
-                    } else if downloadedModels.contains(where: { $0.repoId == model.modelId }) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Button {
-                            selectedModel = model
-                            Task { await loadVariants(for: model) }
-                        } label: {
-                            Image(systemName: "icloud.and.arrow.down")
-                                .font(.title3)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(downloadingModelId != nil)
-                    }
-                }
-                .padding(.vertical, 4)
+                searchResultRow(model)
             }
         } header: {
-            Text("Whisper Models (\(searchResults.count))")
+            Text("Available Models (\(searchResults.count))")
         }
+    }
+    
+    private func searchResultRow(_ model: HFModel) -> some View {
+        let isDownloading = downloadingModelId == model.id
+        
+        return HStack(spacing: 12) {
+            Image(systemName: model.isWhisperCompatible ? "waveform.circle.fill" : "brain.head.profile")
+                .font(.title2)
+                .foregroundStyle(model.isWhisperCompatible ? .blue : .purple)
+                .frame(width: 36)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(model.modelId)
+                        .lineLimit(1)
+                    if model.isWhisperCompatible {
+                        Text("•")
+                        Text("Whisper")
+                            .font(.caption2)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.blue.opacity(0.15))
+                            .clipShape(Capsule())
+                    } else {
+                        Text("•")
+                        Text("ASR")
+                            .font(.caption2)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.purple.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                
+                if let likes = model.likes, likes > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "heart.fill")
+                            .font(.caption2)
+                        Text("\(likes)")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if isDownloading {
+                VStack(spacing: 4) {
+                    ProgressCircle(progress: downloadProgress)
+                        .frame(width: 30, height: 30)
+                    Text("\(Int(downloadProgress * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Button {
+                    Task {
+                        selectedModel = model
+                        await loadVariants(for: model)
+                    }
+                } label: {
+                    Image(systemName: "icloud.and.arrow.down")
+                        .font(.title2)
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .disabled(downloadingModelId != nil)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Actions
@@ -448,6 +511,7 @@ struct ModelsView: View {
         guard let hfModel = selectedModel else { return }
         downloadingModelId = hfModel.id
         downloadProgress = 0
+        downloadingName = hfModel.displayName
 
         do {
             let (model, stream) = try await appState.modelManager.downloadModelWithProgress(hfModel, variant: variant)
@@ -469,6 +533,7 @@ struct ModelsView: View {
 
         downloadingModelId = nil
         downloadProgress = 0
+        downloadingName = ""
     }
 
     private func setDefault(_ model: DownloadedModel) {
@@ -490,7 +555,8 @@ struct ModelsView: View {
             modelLoadState = .loaded
         } catch {
             modelLoadState = .error
-            print("Failed to load model: \(error)")
+            errorMessage = "Failed to load model: \(error.localizedDescription)"
+            showError = true
         }
     }
 
@@ -521,12 +587,21 @@ enum ModelLoadState {
     case error
 }
 
-// MARK: - Int Extension
+// MARK: - Progress Circle
 
-private extension Int {
-    var abbreviated: String {
-        if self >= 1_000_000 { return String(format: "%.1fM", Double(self) / 1_000_000) }
-        if self >= 1_000 { return String(format: "%.1fK", Double(self) / 1_000) }
-        return "\(self)"
+struct ProgressCircle: View {
+    let progress: Double
+    
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: progress)
+            .stroke(style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            .foregroundStyle(.blue)
+            .rotationEffect(.degrees(-90))
+            .animation(.easeInOut, value: progress)
+            .overlay {
+                Circle()
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+            }
     }
 }
