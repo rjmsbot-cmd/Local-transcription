@@ -1,4 +1,5 @@
 name: Build IPA
+
 on:
   workflow_dispatch:
   push:
@@ -9,27 +10,22 @@ jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: |
-          if [ -d "/Applications/Xcode_16.2.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
-          elif [ -d "/Applications/Xcode_16.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
-          else
-            ls -d /Applications/Xcode*.app 2>/dev/null || echo "No Xcode found"
-            exit 1
-          fi
-          xcodebuild -version
+      - name: Select Xcode Version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2' # Selecciona automáticamente Xcode 16.2 o la versión de Xcode 16 disponible
 
-      - name: Clean DerivedData
+      - name: Clean DerivedData and Build Cache
         run: |
           rm -rf ~/Library/Developer/Xcode/DerivedData/WhisperLocal*
-          rm -rf .swiftpm .build
+          rm -rf .swiftpm .build build
 
-      - name: Build for iOS
+      - name: Build for iOS (Ad-Hoc/Unsigned)
         run: |
           xcodebuild \
             -project WhisperLocal.xcodeproj \
@@ -39,7 +35,7 @@ jobs:
             -derivedDataPath build \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_ALLOWED=YES \
             COMPILER_INDEX_STORE_ENABLE=NO \
             ONLY_ACTIVE_ARCH=NO
         timeout-minutes: 25
@@ -52,24 +48,25 @@ jobs:
             exit 1
           }
 
-      - name: Create IPA
+      - name: Create Valid IPA Structure
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/WhisperLocal.app Payload/
-          cd Payload && zip -r ../WhisperLocal.ipa WhisperLocal.app
+          zip -r WhisperLocal.ipa Payload
           echo "IPA size: $(du -h WhisperLocal.ipa | cut -f1)"
 
-      - name: Upload IPA
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: WhisperLocal-IPA
           path: WhisperLocal.ipa
           retention-days: 14
 
-      - name: Upload Build Logs
+      - name: Upload Build Logs (If Failed)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
           path: build/Logs/
           retention-days: 7
+          if-no-files-found: ignore
