@@ -431,7 +431,7 @@ struct ModelsView: View {
                     HStack(spacing: 2) {
                         Image(systemName: "heart.fill")
                             .font(.caption2)
-                        Text("\(likes)")
+                        Text("\(model.likes)")
                             .font(.caption2)
                     }
                     .foregroundStyle(.secondary)
