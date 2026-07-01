@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import UIKit
+import UIKit
 
 struct TranscribeView: View {
     @Environment(\.modelContext) private var modelContext
@@ -20,6 +22,9 @@ struct TranscribeView: View {
     @State private var transcriptionResult: TranscriptionResult?
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var showingNotesPicker = false
+    @State private var importedNotesText: String = ""
+    @State private var showingImportedNotes = false
     
     private let languages = [
         ("auto", "Auto-detect"),
@@ -65,6 +70,21 @@ struct TranscribeView: View {
                 allowsMultipleSelection: false
             ) { result in
                 handleFileImport(result)
+            }
+            .fileImporter(
+                isPresented: $showingNotesPicker,
+                allowedContentTypes: [.text, .utf8PlainText, .rtf],
+                allowsMultipleSelection: false
+            ) { result in
+                handleNotesImport(result)
+            }
+            .sheet(isPresented: $showingImportedNotes) {
+                NotesImportReviewView(
+                    importedText: $importedNotesText,
+                    onSave: { title in
+                        saveImportedNotes(title: title)
+                    }
+                )
             }
             .sheet(isPresented: $showingExport) {
                 if let result = transcriptionResult {
@@ -147,6 +167,35 @@ struct TranscribeView: View {
                         Text("Select Audio File")
                             .font(.headline)
                         Text("MP3, WAV, M4A, FLAC, OGG, OPUS, AAC...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding()
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            
+            // Notes import button
+            Button {
+                showingNotesPicker = true
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "note.text.badge.plus")
+                        .font(.title2)
+                        .foregroundStyle(.orange)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Importar desde Notas")
+                            .font(.headline)
+                        Text("Importar texto desde iOS Notes")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -423,5 +472,47 @@ struct TranscribeView: View {
             modelName: activeModel?.name ?? "Unknown",
             sourceFileName: audioFileName
         )
+    }
+    
+    // MARK: - Notes Import
+    
+    private func handleNotesImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            Task {
+                do {
+                    let data = try Data(contentsOf: url)
+                    if let text = String(data: data, encoding: .utf8) {
+                        importedNotesText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        importedNotesText = String(data: data, encoding: .isoLatin1) ?? ""
+                    }
+                    showingImportedNotes = true
+                } catch {
+                    errorMessage = "No se pudo leer el archivo: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        case .failure(let error):
+            errorMessage = "Error al importar: \(error.localizedDescription)"
+            showError = true
+        }
+    }
+    
+    private func saveImportedNotes(title: String) {
+        let transcription = Transcription(
+            title: title,
+            fullText: importedNotesText,
+            segments: [],
+            duration: 0,
+            detectedLanguage: "importado",
+            modelName: "Importado desde Notas",
+            sourceFileName: "Notes"
+        )
+        modelContext.insert(transcription)
+        try? modelContext.save()
+        importedNotesText = ""
+        showingImportedNotes = false
     }
 }

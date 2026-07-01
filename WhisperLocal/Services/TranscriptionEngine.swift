@@ -24,6 +24,17 @@ final class TranscriptionEngine {
             throw EngineError.modelFileNotFound(path)
         }
         
+        // Validate that the path is a Core ML model directory
+        let url = URL(fileURLWithPath: path)
+        let ext = url.pathExtension.lowercased
+        let lastComponent = url.lastPathComponent.lowercased
+        
+        guard ext == "mlmodelc" || lastComponent.contains("mlmodelc") || ext == "mlpackage" else {
+            throw EngineError.invalidModelFormat(
+                "Only Core ML models (.mlmodelc) are supported. Got: \(ext.isEmpty ? lastComponent : ext)"
+            )
+        }
+        
         do {
             let processor = WhisperProcessor()
             try await processor.loadModel(path: path)
@@ -35,7 +46,7 @@ final class TranscriptionEngine {
             whisperProcessor = nil
             currentModelPath = nil
             print("[TranscriptionEngine] Model load failed: \(error.localizedDescription)")
-            throw error
+            throw EngineError.modelLoadFailed(error.localizedDescription)
         }
     }
     
@@ -136,6 +147,8 @@ enum EngineError: LocalizedError {
     case noModelLoaded
     case modelFileNotFound(String)
     case transcriptionFailed(String)
+    case invalidModelFormat(String)
+    case modelLoadFailed(String)
     
     var errorDescription: String? {
         switch self {
@@ -145,6 +158,10 @@ enum EngineError: LocalizedError {
             return "Model file not found at: \(path)"
         case .transcriptionFailed(let reason):
             return "Transcription failed: \(reason)"
+        case .invalidModelFormat(let detail):
+            return "Invalid model format: \(detail). Download a Core ML (.mlmodelc) model."
+        case .modelLoadFailed(let reason):
+            return "Unable to load model: \(reason)"
         }
     }
 }

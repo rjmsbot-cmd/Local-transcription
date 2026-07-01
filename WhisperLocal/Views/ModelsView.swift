@@ -507,6 +507,34 @@ struct ModelsView: View {
         }
     }
 
+    // Only show Core ML variants since WhisperProcessor only supports Core ML
+    private var coreMLVariants: [ModelVariant] {
+        availableVariants.filter { $0.format == .coreML }
+    }
+    
+    private func IfNoCoreMLWarning() -> some View {
+        Group {
+            if !coreMLVariants.isEmpty {
+                EmptyView()
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.orange)
+                    Text("No Core ML models available")
+                        .font(.headline)
+                    Text("This model doesn't have Core ML variants. WhisperProcessor only supports Core ML (.mlmodelc) models. Try searching for a different model.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+    
     private func startDownload(variant: ModelVariant) async {
         guard let hfModel = selectedModel else { return }
         downloadingModelId = hfModel.id
