@@ -26,7 +26,7 @@
 		A1000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000011; };
 
 		A9500003 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500002 /* TranscriptionTypes.swift */;};
-		A9500005 /* DocumentPickerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500004 /* DocumentPickerService.swift */,;};
+		A9500005 /* DocumentPickerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500004 /* DocumentPickerService.swift */;};
 		A9500007 /* DocumentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500006 /* DocumentPickerSheet.swift */;};
 	A4000002 /* WhisperKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A9000001 /* WhisperKit */;};
 /* End PBXBuildFile section */
