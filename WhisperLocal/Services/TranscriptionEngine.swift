@@ -26,12 +26,15 @@ final class TranscriptionEngine {
         
         // Validate that the path is a Core ML model directory
         let url = URL(fileURLWithPath: path)
-        let ext = url.pathExtension.lowercased
-        let lastComponent = url.lastPathComponent.lowercased
+        let fileExt = url.pathExtension
+        let fileName = url.lastPathComponent
+        let extLower = fileExt.lowercased()
+        let nameLower = fileName.lowercased()
         
-        guard ext == "mlmodelc" || lastComponent.contains("mlmodelc") || ext == "mlpackage" else {
+        guard extLower == "mlmodelc" || nameLower.contains("mlmodelc") || extLower == "mlpackage" else {
+            let reported = extLower.isEmpty ? nameLower : extLower
             throw EngineError.invalidModelFormat(
-                "Only Core ML models (.mlmodelc) are supported. Got: \(ext.isEmpty ? lastComponent : ext)"
+                "Only Core ML models (.mlmodelc) are supported. Got: \(reported)"
             )
         }
         
