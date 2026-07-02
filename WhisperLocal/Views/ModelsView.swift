@@ -206,10 +206,24 @@ struct ModelsView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if availableVariants.isEmpty {
-                    ContentUnavailableView("No variants found", systemImage: "exclamationmark.triangle", description: Text("This model doesn't have downloadable files."))
+                    ContentUnavailableView("No variants found", systemImage: "exclamationmark.triangle", description: Text("This model doesn't have any downloadable model files."))
                 } else {
                     List {
-                        Section {
+                        // Core ML recommendation section
+                        if shouldRecommendCoreML {
+                            Section {
+                                HStack {
+                                    Image(systemName: "lightbulb.fill")
+                                        .foregroundStyle(.blue)
+                                    Text("Core ML recommended — uses Neural Engine for faster inference")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .listRowBackground(Color.blue.opacity(0.05))
+                        }
+                        
+                        Section("Available Variants") {
                             ForEach(availableVariants) { variant in
                                 Button {
                                     Task { await startDownload(variant: variant) }
@@ -510,6 +524,16 @@ struct ModelsView: View {
     // Only show Core ML variants since WhisperProcessor only supports Core ML
     private var coreMLVariants: [ModelVariant] {
         availableVariants.filter { $0.format == .coreML }
+    }
+    
+    // Auto-select first Core ML variant if available
+    private var recommendedVariant: ModelVariant? {
+        coreMLVariants.first
+    }
+    
+    // Check if we should show a Core ML recommendation
+    private var shouldRecommendCoreML: Bool {
+        !coreMLVariants.isEmpty && availableVariants.count > coreMLVariants.count
     }
     
     private func IfNoCoreMLWarning() -> some View {

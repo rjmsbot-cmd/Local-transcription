@@ -51,14 +51,18 @@ actor HuggingFaceService {
         let (data, response) = try await session.data(from: components.url!)
         try validateResponse(response)
         let all = try JSONDecoder().decode([HFModel].self, from: data)
-        // Don't filter - show all ASR models including non-Whisper ones
-        return all
+        // Prioritize models likely to have Core ML variants
+        return all.sorted { a, b in
+            if a.likelyHasCoreML && !b.likelyHasCoreML { return true }
+            if !a.likelyHasCoreML && b.likelyHasCoreML { return false }
+            return a.downloads > b.downloads
+        }
     }
 
     func getPopularWhisperModels() async throws -> [HFModel] {
         var components = URLComponents(string: "\(baseURL)/models")!
         components.queryItems = [
-            URLQueryItem(name: "search", value: "whisper"),
+            URLQueryItem(name: "search", value: "whisper coreml"),
             URLQueryItem(name: "filter", value: "automatic-speech-recognition"),
             URLQueryItem(name: "sort", value: "downloads"),
             URLQueryItem(name: "direction", value: "-1"),
@@ -91,6 +95,7 @@ actor HuggingFaceService {
         }
 
         // Sort: Core ML first, then by size
+        // Note: we allow ALL variants now, not just Core ML
         return variants.sorted { a, b in
             if a.format == .coreML && b.format != .coreML { return true }
             if a.format != .coreML && b.format == .coreML { return false }

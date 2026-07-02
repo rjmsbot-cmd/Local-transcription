@@ -23,6 +23,20 @@ struct HFModel: Identifiable, Codable, Hashable {
                lower.contains("whisper") ||
                lower.contains("asr")
     }
+
+    /// Whether this model likely has Core ML variants (based on tags/name)
+    var likelyHasCoreML: Bool {
+        let lower = modelId.lowercased()
+        let tagLower = tags?.map { $0.lowercased() } ?? []
+        return tagLower.contains("coreml") ||
+               tagLower.contains("core-ml") ||
+               lower.contains("coreml") ||
+               lower.contains("core-ml") ||
+               lower.contains("openai/whisper") ||
+               lower.contains("dtlarry") ||
+               lower.contains("alvanlee")
+    }
+
     
     enum CodingKeys: String, CodingKey {
         case id, modelId, author, pipelineTag, tags, downloads, likes, lastModified
