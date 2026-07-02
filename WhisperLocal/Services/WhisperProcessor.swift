@@ -25,7 +25,7 @@ class WhisperProcessor {
         let url = URL(fileURLWithPath: path)
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
-        model = try await MLModel(contentsOf: url, configuration: config)
+        model = try MLModel(contentsOf: url, configuration: config)
     }
 
     func loadModelFromBundle(name: String) async throws {
@@ -34,7 +34,7 @@ class WhisperProcessor {
         }
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
-        model = try await MLModel(contentsOf: url, configuration: config)
+        model = try MLModel(contentsOf: url, configuration: config)
     }
 
     func transcribe(samples: [Float], language: String? = nil) async throws -> WhisperResult {
@@ -94,16 +94,20 @@ class WhisperProcessor {
                 }
             }
 
-            var splitComplex = DSPSplitComplex(realp: &realp, imagp: &imagp)
+            realp.withUnsafeMutableBufferPointer { realPtr in
+                imagp.withUnsafeMutableBufferPointer { imagPtr in
+                    var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
 
-            windowedSamples.withUnsafeBufferPointer { ptr in
-                ptr.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: nFFT / 2) { complexPtr in
-                    vDSP_ctoz(complexPtr, 2, &splitComplex, 1, vDSP_Length(nFFT / 2))
+                    windowedSamples.withUnsafeBufferPointer { ptr in
+                        ptr.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: nFFT / 2) { complexPtr in
+                            vDSP_ctoz(complexPtr, 2, &splitComplex, 1, vDSP_Length(nFFT / 2))
+                        }
+                    }
+
+                    vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(kFFTDirection_Forward))
+                    vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(nFFT / 2 + 1))
                 }
             }
-
-            vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(kFFTDirection_Forward))
-            vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(nFFT / 2 + 1))
 
             for mel in 0..<nMels {
                 let lowFreq = Float(mel) * Float(sampleRate / 2) / Float(nMels)

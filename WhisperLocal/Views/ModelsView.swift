@@ -225,43 +225,9 @@ struct ModelsView: View {
                         
                         Section("Available Variants") {
                             ForEach(availableVariants) { variant in
-                                Button {
+                                VariantRowView(variant: variant) {
                                     Task { await startDownload(variant: variant) }
                                     showVariantSheet = false
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: variant.format.icon)
-                                            .font(.title2)
-                                            .foregroundStyle(variant.format == .coreML ? .blue : .orange)
-                                            .frame(width: 36)
-
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(variant.quantization)
-                                                .font(.headline)
-                                                .foregroundStyle(.primary)
-                                            Text(variant.fileName)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                            HStack(spacing: 8) {
-                                                Text(variant.format.badge)
-                                                    .font(.caption2)
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 2)
-                                                    .background(variant.format == .coreML ? .blue.opacity(0.15) : .orange.opacity(0.15))
-                                                    .clipShape(Capsule())
-                                                Text(variant.fileSizeFormatted)
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-
-                                        Spacer()
-
-                                        Image(systemName: "icloud.and.arrow.down")
-                                            .foregroundStyle(.blue)
-                                    }
-                                    .padding(.vertical, 4)
                                 }
                             }
                         } header: {
@@ -624,8 +590,56 @@ struct ModelsView: View {
         if isModelLoaded, loadedModelName == model.name {
             unloadModel()
         }
-        try? appState.modelManager.deleteModel(model)
-        modelContext.delete(model)
+        Task {
+            try? await appState.modelManager.deleteModel(model)
+            await MainActor.run { modelContext.delete(model) }
+        }
+    }
+}
+
+
+// MARK: - Variant Row View (extracted to avoid compiler type-check timeout)
+
+struct VariantRowView: View {
+    let variant: HFModel.Variant
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: variant.format.icon)
+                    .font(.title2)
+                    .foregroundStyle(variant.format == .coreML ? .blue : .orange)
+                    .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(variant.quantization)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(variant.fileName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(variant.format.badge)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(variant.format == .coreML ? .blue.opacity(0.15) : .orange.opacity(0.15))
+                            .clipShape(Capsule())
+                        Text(variant.fileSizeFormatted)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "icloud.and.arrow.down")
+                    .foregroundStyle(.blue)
+            }
+            .padding(.vertical, 4)
+        }
     }
 }
 

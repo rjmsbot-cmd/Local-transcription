@@ -208,7 +208,7 @@ actor HuggingFaceService {
                     continuation.finish()
                 } catch {
                     // Clean up partial download on error
-                    let modelsDir = try? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    let modelsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                         .appendingPathComponent("WhisperModels", isDirectory: true)
                     let safeName = fileName.replacingOccurrences(of: "/", with: "_")
                     let destination = modelsDir?.appendingPathComponent(safeName)
