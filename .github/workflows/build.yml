@@ -17,6 +17,12 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_15.4.app
           xcodebuild -version
 
+      - name: Resolve Package Dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project WhisperLocal.xcodeproj \
+            -scheme WhisperLocal
+
       - name: Build for iOS Device
         run: |
           xcodebuild \
