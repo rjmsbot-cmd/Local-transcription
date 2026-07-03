@@ -585,7 +585,7 @@ struct RecordView: View {
         transcriptionResult = nil
         
         do {
-            try await appState.transcriptionEngine.loadModel(at: model.localPath)
+            try await appState.transcriptionEngine.loadModel(at: model.fullPath ?? URL(fileURLWithPath: ""))
             appState.activeModelName = model.name
             
             let result = try await appState.transcriptionEngine.transcribe(

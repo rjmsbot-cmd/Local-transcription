@@ -1,456 +1,178 @@
 import Foundation
+import CryptoKit
 
-/// Client for HuggingFace Hub API — search models, list files, download.
-actor HuggingFaceService {
-    private let baseURL = "https://huggingface.co/api"
-    private let downloadBase = "https://huggingface.co"
+// MARK: - Models
+
+struct HFRepoInfo: Codable, Identifiable, Hashable {
+    let id: String
+    let modelId: String
+    let author: String
+    let tags: [String]
+    let downloads: Int?
+    let likes: Int?
+    let `private`: Bool
+    let sdkCapabilities: [String: [String]]?
+    
+    var isCoreML: Bool { tags.contains("coreml") || (sdkCapabilities?["coreml"] != nil) }
+    var displayName: String { modelId }
+    
+    static func == (lhs: HFRepoInfo, rhs: HFRepoInfo) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+struct HFFileEntry: Codable {
+    let path: String
+    let size: Int64?
+    let lfs: HFFileLFS?
+    let type: String?
+    
+    var isDirectory: Bool { type == "directory" }
+    var isFile: Bool { type == "file" || (!isDirectory && lfs != nil) }
+}
+
+struct HFFileLFS: Codable {
+    let size: Int64?
+    let sha256: String?
+}
+
+// MARK: - Service
+
+@MainActor
+final class HuggingFaceService {
+    static let shared = HuggingFaceService()
     private let session: URLSession
-
-    init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 7200
-        config.httpMaximumConnectionsPerHost = 4
-        config.waitsForConnectivity = true
-        // Allow cellular downloads
-        config.allowsCellularAccess = true
-        self.session = URLSession(configuration: config)
-    }
-
-    // MARK: - URL Sanitization (Security)
-
-    private static func sanitizePathComponent(_ input: String) -> String {
-        let sanitized = input
-            .replacingOccurrences(of: "//", with: "/")
-            .replacingOccurrences(of: "../", with: "")
-            .replacingOccurrences(of: "..\\", with: "")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/\\ \t\n\r"))
-        guard CharacterSet.alphanumerics
-            .union(CharacterSet(charactersIn: "._-"))
-            .isSuperset(of: CharacterSet(charactersIn: sanitized)) else {
-            return sanitized.components(
-                separatedBy: CharacterSet.alphanumerics
-                    .union(CharacterSet(charactersIn: "._-"))
-            ).joined(separator: "_")
-        }
-        return sanitized
-    }
-
-    // MARK: - Search
-
-    func searchModels(query: String, limit: Int = 30) async throws -> [HFModel] {
-        var components = URLComponents(string: "\(baseURL)/models")!
-        components.queryItems = [
-            URLQueryItem(name: "search", value: query),
-            URLQueryItem(name: "filter", value: "coreml"),
-            URLQueryItem(name: "sort", value: "downloads"),
-            URLQueryItem(name: "direction", value: "-1"),
-            URLQueryItem(name: "limit", value: "\(limit)")
-        ]
-
-        let (data, response) = try await session.data(from: components.url!)
-        try validateResponse(response)
-        let all = try JSONDecoder().decode([HFModel].self, from: data)
-        
-        // Filter: only keep models that actually have CoreML or GGUF files
-        var compatible: [HFModel] = []
-        for model in all {
-            do {
-                let hasCompatible = try await hasCompatibleFiles(repoId: model.id)
-                if hasCompatible {
-                    compatible.append(model)
-                }
-            } catch {
-                // If we can't check, skip the model rather than show broken ones
-            }
-        }
-        
-        return compatible.sorted { a, b in
-            if a.likelyHasCoreML && !b.likelyHasCoreML { return true }
-            if !a.likelyHasCoreML && b.likelyHasCoreML { return false }
-            return a.downloads > b.downloads
-        }
+    
+    private init() {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 60
+        cfg.timeoutIntervalForResource = 600
+        cfg.httpAdditionalHeaders = ["User-Agent": "WhisperLocal-iOS/1.0"]
+        self.session = URLSession(configuration: cfg)
     }
     
-    /// Check if a repo has CoreML (.mlpackage/.mlmodelc) or GGUF (.gguf) files suitable for iPhone 15 Pro
-    func hasCompatibleFiles(repoId: String) async throws -> Bool {
-        let files = try await listFiles(repoId: repoId)
-        
-        for file in files {
-            // CoreML packages/directories
-            if file.isDirectory && (file.path.hasSuffix(".mlpackage") || file.path.hasSuffix(".mlmodelc")) {
-                return true
-            }
-            // GGUF files (prefer smaller ones for iPhone)
-            if file.path.hasSuffix(".gguf") {
-                let size = file.size ?? file.lfs?.size ?? 0
-                // iPhone 15 Pro has 8GB RAM, keep models under 4GB
-                if size < 4_000_000_000 {
-                    return true
-                }
-            }
-            // CoreML files
-            if file.path.hasSuffix(".mlmodel") || file.path.hasSuffix(".mlmodelc") {
-                return true
-            }
+    // MARK: - Search
+    
+    func searchModels(query: String, limit: Int = 20) async throws -> [HFRepoInfo] {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let url = URL(string: "https://huggingface.co/api/models?search=\(encoded)&sort=downloads&direction=-1&limit=\(limit)&pipeline_tag=automatic-speech-recognition")!
+        let (data, response) = try await session.data(for: URLRequest(url: url))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw HFError.httpError(response as? HTTPURLResponse)
         }
-        return false
+        return try JSONDecoder().decode([HFRepoInfo].self, from: data)
     }
-
-    func getPopularWhisperModels() async throws -> [HFModel] {
-        var components = URLComponents(string: "\(baseURL)/models")!
-        components.queryItems = [
-            URLQueryItem(name: "search", value: "whisper coreml"),
-            URLQueryItem(name: "filter", value: "coreml"),
-            URLQueryItem(name: "sort", value: "downloads"),
-            URLQueryItem(name: "direction", value: "-1"),
-            URLQueryItem(name: "limit", value: "50")
-        ]
-
-        let (data, response) = try await session.data(from: components.url!)
-        try validateResponse(response)
-        let all = try JSONDecoder().decode([HFModel].self, from: data)
-        
-        // Filter: only keep models that actually have CoreML or GGUF files for iPhone 15 Pro
-        var compatible: [HFModel] = []
-        for model in all where model.isWhisperCompatible {
-            do {
-                let hasCompatible = try await hasCompatibleFiles(repoId: model.id)
-                if hasCompatible {
-                    compatible.append(model)
-                }
-            } catch {
-                // Skip models we can't verify
+    
+    func repoInfo(modelId: String) async throws -> HFRepoInfo {
+        let encoded = modelId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? modelId
+        let url = URL(string: "https://huggingface.co/api/models/\(encoded)")!
+        let (data, response) = try await session.data(for: URLRequest(url: url))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw HFError.httpError(response as? HTTPURLResponse)
+        }
+        return try JSONDecoder().decode(HFRepoInfo.self, from: data)
+    }
+    
+    // MARK: - Tree
+    
+    func listTree(repoId: String, path: String = "") async throws -> [HFFileEntry] {
+        var comps = URLComponents(url: URL(string: "https://huggingface.co/api/models/\(repoId)/tree/main")!, resolvingAgainstBaseURL: false)!
+        if !path.isEmpty { comps.queryItems = [URLQueryItem(name: "path", value: path)] }
+        let (data, response) = try await session.data(for: URLRequest(url: comps.url!))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw HFError.httpError(response as? HTTPURLResponse)
+        }
+        return try JSONDecoder().decode([HFFileEntry].self, from: data)
+    }
+    
+    func collectAllFiles(repoId: String, dirPath: String) async throws -> [HFFileEntry] {
+        let entries = try await listTree(repoId: repoId, path: dirPath)
+        var files: [HFFileEntry] = []
+        for entry in entries {
+            if entry.isDirectory {
+                try files.append(contentsOf: await collectAllFiles(repoId: repoId, dirPath: entry.path))
+            } else if entry.isFile {
+                files.append(entry)
             }
         }
-        
-        return compatible.sorted { a, b in
-            if a.likelyHasCoreML && !b.likelyHasCoreML { return true }
-            if !a.likelyHasCoreML && b.likelyHasCoreML { return false }
-            return a.downloads > b.downloads
-        }
+        return files
     }
-
-    // MARK: - Model Files
-
-    func listFiles(repoId: String) async throws -> [HFFileItem] {
-        let url = URL(string: "\(baseURL)/models/\(repoId)/tree/main")!
-        let (data, response) = try await session.data(from: url)
-        try validateResponse(response)
-        return try JSONDecoder().decode([HFFileItem].self, from: data)
-    }
-
-    func listModelVariants(repoId: String) async throws -> [ModelVariant] {
-        let files = try await listFiles(repoId: repoId)
-        
-        // Filter for actual model files (not directories)
-        // Include common model formats: .gguf, .safetensors, .bin, .pt, .onnx, .mlmodelc, .mlpackage
-        let modelFiles = files.filter { file in
-            guard !file.isDirectory else { return false }
-            let path = file.path.lowercased()
-            return path.hasSuffix(".gguf") ||
-                   path.hasSuffix(".safetensors") ||
-                   path.hasSuffix(".bin") ||
-                   path.hasSuffix(".pt") ||
-                   path.hasSuffix(".onnx") ||
-                   path.hasSuffix(".mlmodelc") ||
-                   path.hasSuffix(".mlpackage") ||
-                   path.hasSuffix(".mlmodel") ||
-                   path.hasSuffix(".tflite") ||
-                   path.hasSuffix(".pb")
-        }
-
-        // If no model files found, try to find any large files (>10MB) that might be models
-        var finalFiles = modelFiles
-        if modelFiles.isEmpty {
-            finalFiles = files.filter { file in
-                guard !file.isDirectory else { return false }
-                // Large files are likely model weights
-                return (file.size ?? 0) > 10_000_000
-            }
-        }
-
-        var variants: [ModelVariant] = []
-        for file in finalFiles {
-            let variant = ModelVariant(from: file)
-            variants.append(variant)
-        }
-
-        // Sort: Core ML first, then GGUF, then by size
-        return variants.sorted { a, b in
-            let formatPriority: (ModelFormat) -> Int = { format in
-                switch format {
-                case .coreML: return 0
-                case .gguf: return 1
-                case .onnx: return 2
-                case .pytorch: return 3
-                case .other: return 4
-                }
-            }
-            let aPriority = formatPriority(a.format)
-            let bPriority = formatPriority(b.format)
-            if aPriority != bPriority { return aPriority < bPriority }
-            return (a.fileSize ?? 0) < (b.fileSize ?? 0)
-        }
-    }
-
-    func findBestModelFile(repoId: String) async throws -> HFFileItem? {
-        let files = try await listFiles(repoId: repoId)
-        let modelFiles = files.filter { $0.isModelFile && !$0.isDirectory }
-
-        return modelFiles.first(where: { $0.isCoreML }) ??
-               modelFiles.first(where: { $0.isGGUF }) ??
-               modelFiles.first(where: { $0.path.hasSuffix(".onnx") }) ??
-               modelFiles.first(where: { $0.path.hasSuffix(".bin") }) ??
-               modelFiles.first(where: { $0.path.hasSuffix(".pt") }) ??
-               modelFiles.first
-    }
-
-    // MARK: - Download (Streaming - no memory issues)
-
+    
+    // MARK: - Download
+    
     func downloadFile(
         repoId: String,
-        fileName: String,
-        progressHandler: @MainActor @escaping (Double) -> Void
-    ) async throws -> URL {
-        // Delegate to streaming download
-        let stream = downloadFileWithProgress(repoId: repoId, fileName: fileName)
+        filePath: String,
+        to destURL: URL,
+        progress: @escaping (Double) -> Void
+    ) async throws -> String {
+        let encodedRepo = repoId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? repoId
+        let encodedPath = filePath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? filePath
+        let url = URL(string: "https://huggingface.co/\(encodedRepo)/resolve/main/\(encodedPath)")!
         
-        for try await progress in stream {
-            await progressHandler(progress)
+        try FileManager.default.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: destURL.path()) {
+            try? FileManager.default.removeItem(at: destURL)
         }
         
-        // Return the destination path (must match downloadFileWithProgress)
-        let modelsDir = try modelsDirectory()
-        let safeName = fileName.replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: " ", with: "_")
-        return modelsDir.appendingPathComponent(safeName)
+        let (tmpURL, response) = try await session.download(from: url)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            try? FileManager.default.removeItem(at: tmpURL)
+            throw HFError.httpError(response as? HTTPURLResponse)
+        }
+        
+        let sha = try sha256OfFile(at: tmpURL)
+        try FileManager.default.moveItem(at: tmpURL, to: destURL)
+        progress(1.0)
+        return sha
     }
-
-    func downloadFileWithProgress(
+    
+    func downloadDirectory(
         repoId: String,
-        fileName: String
-    ) -> AsyncThrowingStream<Double, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    let modelsDir = try self.modelsDirectory()
-                    let safeName = fileName.replacingOccurrences(of: "/", with: "_")
-                        .replacingOccurrences(of: " ", with: "_")
-                    let destination = modelsDir.appendingPathComponent(safeName)
-
-                    // Skip if already downloaded
-                    if FileManager.default.fileExists(atPath: destination.path) {
-                        continuation.yield(1.0)
-                        continuation.finish()
-                        return
-                    }
-
-                    let downloadURL = URL(string: "\(self.downloadBase)/\(repoId)/resolve/main/\(fileName)")!
-                    
-                    // Use bytes stream for memory-efficient download
-                    let (bytes, response) = try await self.session.bytes(from: downloadURL)
-                    try self.validateResponse(response)
-
-                    let expectedBytes = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Length").flatMap(Int64.init) ?? 0
-
-                    var receivedBytes: Int64 = 0
-                    var accumulator = Data()
-                    let chunkSize = 1024 * 512 // 512KB chunks
-
-                    for try await byte in bytes {
-                        accumulator.append(byte)
-                        receivedBytes += 1
-
-                        if accumulator.count >= chunkSize {
-                            if FileManager.default.fileExists(atPath: destination.path) {
-                                let handle = try FileHandle(forWritingTo: destination)
-                                handle.seekToEndOfFile()
-                                handle.write(accumulator)
-                                handle.closeFile()
-                            } else {
-                                try accumulator.write(to: destination)
-                            }
-                            accumulator.removeAll()
-
-                            if expectedBytes > 0 {
-                                let progress = Double(receivedBytes) / Double(expectedBytes)
-                                continuation.yield(min(progress, 0.99))
-                            } else {
-                                // No content-length, just report periodic progress
-                                if receivedBytes % (1024 * 1024 * 10) == 0 {
-                                    continuation.yield(0.5)
-                                }
-                            }
-                        }
-                    }
-
-                    // Write remaining data
-                    if !accumulator.isEmpty {
-                        if FileManager.default.fileExists(atPath: destination.path) {
-                            let handle = try FileHandle(forWritingTo: destination)
-                            handle.seekToEndOfFile()
-                            handle.write(accumulator)
-                            handle.closeFile()
-                        } else {
-                            try accumulator.write(to: destination)
-                        }
-                    }
-
-                    // Verify file exists after download
-                    guard FileManager.default.fileExists(atPath: destination.path) else {
-                        throw HFError.downloadFailed
-                    }
-
-                    continuation.yield(1.0)
-                    continuation.finish()
-                } catch {
-                    // Clean up partial download on error
-                    let modelsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                        .appendingPathComponent("WhisperModels", isDirectory: true)
-                    let safeName = fileName.replacingOccurrences(of: "/", with: "_")
-                        .replacingOccurrences(of: " ", with: "_")
-                    let destination = modelsDir.appendingPathComponent(safeName)
-                    if FileManager.default.fileExists(atPath: destination.path) {
-                        try? FileManager.default.removeItem(at: destination)
-                    }
-                    continuation.finish(throwing: error)
-                }
-            }
+        remoteDir: String,
+        to localDir: URL,
+        progress: @escaping (Double) -> Void
+    ) async throws -> [String: String] {
+        let files = try await collectAllFiles(repoId: repoId, dirPath: remoteDir)
+        guard !files.isEmpty else { return [:] }
+        
+        let totalSize = files.reduce(Int64(0)) { $0 + ($1.size ?? 0) }
+        var downloaded: Int64 = 0
+        var shaMap: [String: String] = [:]
+        
+        for file in files {
+            let relative = String(file.path.dropFirst(remoteDir.count + 1))
+            let dest = localDir.appendingPathComponent(relative)
+            
+            let fileSha = try await downloadFile(repoId: repoId, filePath: file.path, to: dest, progress: { _ in })
+            shaMap[relative] = fileSha
+            downloaded += file.size ?? 0
+            progress(Double(downloaded) / Double(max(totalSize, 1)))
         }
+        
+        return shaMap
     }
-
-    // MARK: - Delete
-
-    func deleteDownloadedFile(fileName: String) throws {
-        let modelsDir = try modelsDirectory()
-        let safeName = fileName.replacingOccurrences(of: "/", with: "_")
-        let fileURL = modelsDir.appendingPathComponent(safeName)
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            try FileManager.default.removeItem(at: fileURL)
-        }
-    }
-
+    
     // MARK: - Helpers
-
-    private func modelsDirectory() throws -> URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("WhisperModels", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    private func validateResponse(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw HFError.invalidResponse(statusCode: -1)
-        }
-        switch http.statusCode {
-        case 200: return
-        case 404: throw HFError.notFound
-        case 429: throw HFError.rateLimited
-        case 401, 403: throw HFError.accessDenied
-        default: throw HFError.invalidResponse(statusCode: http.statusCode)
-        }
+    
+    private func sha256OfFile(at url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        let digest = Insecure.SHA256.hash(data: data)
+        return digest.compactMap { String(format: "%02x", $0) }.joined()
     }
 }
 
-// MARK: - Model Variant (for quantization selection)
-
-struct ModelVariant: Identifiable, Hashable {
-    let id = UUID()
-    let fileName: String
-    let format: ModelFormat
-    let quantization: String
-    let fileSize: Int64?
-    let fileSizeFormatted: String
-
-    init(from file: HFFileItem) {
-        self.fileName = file.path
-        self.fileSize = file.size ?? file.lfs?.size
-        self.fileSizeFormatted = ByteCountFormatter.string(fromByteCount: self.fileSize ?? 0, countStyle: .file)
-
-        // Detect format
-        if file.isCoreML {
-            self.format = ModelFormat.coreML
-        } else if file.isGGUF {
-            self.format = ModelFormat.gguf
-        } else if file.path.hasSuffix(".onnx") {
-            self.format = ModelFormat.onnx
-        } else if file.path.hasSuffix(".bin") || file.path.hasSuffix(".pt") {
-            self.format = ModelFormat.pytorch
-        } else {
-            self.format = ModelFormat.other
-        }
-
-        // Detect quantization from filename
-        let lower = file.path.lowercased()
-        if lower.contains("q4_0") { self.quantization = "Q4_0 (smallest, fastest)" }
-        else if lower.contains("q4_1") { self.quantization = "Q4_1" }
-        else if lower.contains("q4_k_m") { self.quantization = "Q4_K_M (recommended)" }
-        else if lower.contains("q4_k_s") { self.quantization = "Q4_K_S" }
-        else if lower.contains("q5_0") { self.quantization = "Q5_0" }
-        else if lower.contains("q5_1") { self.quantization = "Q5_1" }
-        else if lower.contains("q5_k_m") { self.quantization = "Q5_K_M" }
-        else if lower.contains("q5_k_s") { self.quantization = "Q5_K_S" }
-        else if lower.contains("q6_k") { self.quantization = "Q6_K (high quality)" }
-        else if lower.contains("q8_0") { self.quantization = "Q8_0 (best quantized)" }
-        else if lower.contains("float16") || lower.contains("fp16") { self.quantization = "Float16" }
-        else if lower.contains("float32") || lower.contains("fp32") { self.quantization = "Float32 (full precision)" }
-        else if lower.contains("int8") { self.quantization = "Int8" }
-        else if lower.contains("int4") { self.quantization = "Int4" }
-        else if lower.contains("4bit") { self.quantization = "4-bit" }
-        else if lower.contains("8bit") { self.quantization = "8-bit" }
-        else if lower.contains("16bit") { self.quantization = "16-bit" }
-        else if file.isCoreML { self.quantization = "Core ML (Neural Engine)" }
-        else if file.isGGUF { self.quantization = "GGUF" }
-        else { self.quantization = "Default" }
-    }
-}
-
-enum ModelFormat: String, Hashable {
-    case coreML = "Core ML"
-    case gguf = "GGUF"
-    case onnx = "ONNX"
-    case pytorch = "PyTorch"
-    case other = "Other"
-
-    var icon: String {
-        switch self {
-        case .coreML: return "cpu"
-        case .gguf: return "cube"
-        case .onnx: return "square.grid.3x3"
-        case .pytorch: return "flame"
-        case .other: return "doc"
-        }
-    }
-
-    var badge: String {
-        switch self {
-        case .coreML: return "⚡ Neural Engine"
-        case .gguf: return "📦 GGUF"
-        case .onnx: return "🔧 ONNX"
-        case .pytorch: return "🔥 PyTorch"
-        case .other: return "📄"
-        }
-    }
-}
+// MARK: - Errors
 
 enum HFError: LocalizedError {
-    case invalidResponse(statusCode: Int)
-    case notFound
-    case rateLimited
-    case accessDenied
-    case noCompatibleFile
-    case downloadFailed
-
+    case httpError(HTTPURLResponse?)
+    case downloadFailed(String)
+    
     var errorDescription: String? {
         switch self {
-        case .invalidResponse(let code): return "HuggingFace returned HTTP \(code)"
-        case .notFound: return "Model or file not found on HuggingFace"
-        case .rateLimited: return "Rate limited by HuggingFace. Try again in a minute."
-        case .accessDenied: return "Access denied. The model may require authentication."
-        case .noCompatibleFile: return "No compatible model file found in this repository"
-        case .downloadFailed: return "Download completed but file not found. Please try again."
+        case .httpError(let resp):
+            return "Error de Hugging Face (HTTP \(resp?.statusCode ?? 0))."
+        case .downloadFailed(let msg):
+            return "Descarga fallida: \(msg)"
         }
     }
 }

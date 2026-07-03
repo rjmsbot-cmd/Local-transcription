@@ -1,692 +1,217 @@
+import Foundation
 import SwiftUI
 import SwiftData
 
 struct ModelsView: View {
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject var appState: AppState
-    @Query(sort: \DownloadedModel.downloadedAt, order: .reverse) private var downloadedModels: [DownloadedModel]
-
-    @State private var searchText = ""
-    @State private var searchResults: [HFModel] = []
-    @State private var isSearching = false
-
-    @State private var downloadingModelId: String?
-    @State private var downloadProgress: Double = 0
-    @State private var downloadingName: String = ""
-
-    @State private var showDeleteAlert = false
-    @State private var modelToDelete: DownloadedModel?
-
-    // Variant selection
-    @State private var showVariantSheet = false
-    @State private var selectedModel: HFModel?
-    @State private var availableVariants: [ModelVariant] = []
-    @State private var isLoadingVariants = false
-
-    @State private var errorMessage: String?
-    @State private var showError = false
+    @EnvironmentObject private var appState: AppState
+    @State private var manager: ModelManager?
+    @State private var searchQuery = ""
+    @State private var selectedModel: HFRepoInfo?
+    @State private var showDownloadSheet = false
+    @State private var diskSpace: String = ""
     
-    @State private var modelLoadState: ModelLoadState = .idle
-
-    // Computed
-    private var isModelLoaded: Bool {
-        appState.transcriptionEngine.whisperProcessorLoaded
-    }
-    private var loadedModelName: String? {
-        appState.transcriptionEngine.loadedModelPath.flatMap { path in
-            downloadedModels.first(where: { $0.localPath == path })?.name
-        } ?? appState.activeModelName
-    }
-    
-    private var modelMemoryFormatted: String {
-        appState.transcriptionEngine.modelMemoryFormatted
-    }
-
     var body: some View {
-        NavigationStack {
-            List {
-                // Model status section
-                modelStatusSection
-                
-                // Downloading progress (if active)
-                if downloadingModelId != nil {
-                    downloadingProgressSection
-                }
-
-                downloadedSection
-
-                if isSearching {
-                    HStack {
-                        Spacer()
-                        ProgressView("Searching HuggingFace...")
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
-                }
-
-                if !searchResults.isEmpty {
-                    searchResultsSection
-                }
-
-                if searchResults.isEmpty && !isSearching && !searchText.isEmpty {
-                    ContentUnavailableView("No models found", systemImage: "magnifyingglass", description: Text("Try searching for \"whisper-small\", \"whisper-large-v3\", or \"qwen-asr\""))
-                }
-            }
-            .navigationTitle("Models")
-            .searchable(text: $searchText, prompt: "Search models (e.g. whisper-small, qwen-asr)")
-            .onSubmit(of: .search) { Task { await search() } }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { Task { await search() } } label: {
-                            Label("Search", systemImage: "magnifyingglass")
-                        }
-                        Button { Task { await loadPopular() } } label: {
-                            Label("Popular Whisper Models", systemImage: "flame")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                }
-            }
-            .sheet(isPresented: $showVariantSheet) {
-                variantPickerSheet
-            }
-            .alert("Delete Model", isPresented: $showDeleteAlert) {
-                Button("Delete", role: .destructive) {
-                    if let m = modelToDelete { deleteModel(m) }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will remove the downloaded model file from your device.")
-            }
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(errorMessage ?? "Unknown error")
-            }
-            .task {
-                if searchResults.isEmpty { await loadPopular() }
-            }
-        }
-    }
-    
-    // MARK: - Model Status Section
-    
-    private var modelStatusSection: some View {
-        Section("Model in Memory") {
-            HStack(spacing: 12) {
-                // Status indicator
-                ZStack {
-                    Circle()
-                        .fill(isModelLoaded ? Color.green : Color.gray.opacity(0.4))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: isModelLoaded ? "checkmark" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(.white)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(isModelLoaded ? "Model Loaded" : "No Model Loaded")
-                        .font(.headline)
-                        .foregroundStyle(isModelLoaded ? .green : .secondary)
-                    
-                    if let name = loadedModelName {
-                        Text(name)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    HStack(spacing: 8) {
-                        Label(modelMemoryFormatted, systemImage: "memorychip")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        if isModelLoaded {
-                            Text("•")
-                                .foregroundStyle(.tertiary)
-                            Text("Neural Engine ready")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                if isModelLoaded {
-                    Button {
-                        unloadModel()
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.red)
-                            Text("Unload")
-                                .font(.caption2)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 4)
-        }
-    }
-    
-    // MARK: - Downloading Progress Section
-    
-    private var downloadingProgressSection: some View {
-        Section("Downloading") {
-            HStack {
-                ProgressView(value: downloadProgress)
-                VStack(alignment: .leading) {
-                    Text(downloadingName)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                    Text("\(Int(downloadProgress * 100))%")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    // MARK: - Variant Picker Sheet
-
-    private var variantPickerContent: some View {
         Group {
-            if isLoadingVariants {
-                ProgressView("Loading available variants...")
-                    .foregroundStyle(.secondary)
-            } else if availableVariants.isEmpty {
-                ContentUnavailableView(
-    "No downloadable variants",
-    systemImage: "exclamationmark.triangle",
-    description: Text("This repository doesn't contain model files (.gguf, .mlmodelc, .bin, .pt, .onnx). Try searching for a different model or check if the files are in a different branch.")
-)
+            if manager == nil {
+                ProgressView("Cargando...")
+                    .onAppear { manager = ModelManager(modelContext: modelContext) }
             } else {
-                variantListContent
+                contentView
+            }
+        }
+        .navigationTitle("Modelos")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { Task { refresh() } } label: { Image(systemName: "arrow.clockwise") }
+            }
+        }
+        .sheet(isPresented: $showDownloadSheet) {
+            if let repo = selectedModel {
+                DownloadSheet(repo: repo, manager: manager!, modelContext: modelContext, isPresented: $showDownloadSheet)
             }
         }
     }
     
-    private var variantListContent: some View {
-        VStack(spacing: 12) {
-            if shouldRecommendCoreML {
-                HStack {
-                    Image(systemName: "lightbulb.fill")
-                        .foregroundStyle(.blue)
-                    Text("Core ML recommended — uses Neural Engine for faster inference")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+    private var contentView: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                TextField("Buscar modelos...", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .submitLabel(.search)
+                    .onSubmit { performSearch() }
+                if !searchQuery.isEmpty {
+                    Button { searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .background(Color.blue.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                .padding(.horizontal)
             }
+            .padding(10)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(10)
+            .padding(.horizontal)
+            .padding(.top, 8)
             
-            List {
-                Section {
-                    ForEach(availableVariants) { variant in
-                        VariantRowView(variant: variant) {
-                            Task { await startDownload(variant: variant) }
-                            showVariantSheet = false
+            HStack {
+                Image(systemName: "internaldrive").foregroundColor(.secondary)
+                Text("Espacio: \(diskSpace)").font(.caption).foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 4)
+            
+            if manager!.isLoading {
+                ProgressView("Buscando...").frame(height: 100)
+            } else if let error = manager!.errorMessage {
+                ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
+                    .frame(height: 100)
+            } else if manager!.availableModels.isEmpty && manager!.downloadedModels.isEmpty {
+                ContentUnavailableView("Sin modelos", systemImage: "brain",
+                    description: Text("Busca un modelo de Whisper en Hugging Face."))
+            } else {
+                List {
+                    Section("Descargados (\(manager!.downloadedModels.count))") {
+                        ForEach(manager!.downloadedModels) { model in
+                            ModelRow(model: model, manager: manager!)
+                        }
+                        .onDelete { indices in
+                            for index in indices {
+                                try? manager!.removeModel(manager!.downloadedModels[index], context: modelContext)
+                            }
                         }
                     }
-                } header: {
-                    Text("\(selectedModel?.displayName ?? "Model") — \(availableVariants.count) variants")
-                } footer: {
-                    Text("⚡ Core ML uses the Neural Engine for best performance. GGUF/ONNX run on CPU.")
+                    if !manager!.availableModels.isEmpty {
+                        Section("Resultados (\(manager!.availableModels.count))") {
+                            ForEach(manager!.availableModels) { repo in
+                                SearchResultRow(repo: repo) {
+                                    selectedModel = repo
+                                    showDownloadSheet = true
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-    }
-
-    private var variantPickerSheet: some View {
-        NavigationStack {
-            variantPickerContent
-            .navigationTitle("Select Variant")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") { showVariantSheet = false }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    // MARK: - Downloaded Section
-
-    private var downloadedSection: some View {
-        Section {
-            if downloadedModels.isEmpty {
-                ContentUnavailableView {
-                    Label("No Models Downloaded", systemImage: "arrow.down.circle.dashed")
-                } description: {
-                    Text("Search and download a Whisper model to start transcribing.\n\nRecommended: whisper-small (good balance of speed and quality)")
-                }
-            } else {
-                ForEach(downloadedModels) { model in
-                    modelRow(model)
-                }
-            }
-        } header: {
-            Text("Downloaded (\(downloadedModels.count))")
-        }
+        .onAppear { diskSpace = manager?.diskSpaceAvailable ?? "..." }
     }
     
-    private func modelRow(_ model: DownloadedModel) -> some View {
-        let isCurrentlyLoaded = isModelLoaded && loadedModelName == model.name
-        
-        return HStack(spacing: 12) {
-            Image(systemName: model.isDefault ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(model.isDefault ? .blue : .gray.opacity(0.3))
-                .font(.title3)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(model.name)
-                    .font(.headline)
-                HStack(spacing: 6) {
-                    Text(model.repoId)
-                        .lineLimit(1)
-                    Text("•")
-                    Text(model.fileSizeFormatted)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                
-                if isCurrentlyLoaded {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                        Text("Loaded in memory")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                    }
-                }
-            }
-
-            Spacer()
-            
-            // Action buttons
-            Menu {
-                // Set as default
-                if !model.isDefault {
-                    Button {
-                        setDefault(model)
-                    } label: {
-                        Label("Set Default", systemImage: "checkmark.circle")
-                    }
-                } else {
-                    Button {
-                        // Already default
-                    } label: {
-                        Label("Default", systemImage: "checkmark.circle.fill")
-                    }
-                    .disabled(true)
-                }
-                
-                // Load model
-                if !isCurrentlyLoaded {
-                    Button {
-                        Task { await setDefaultAndLoad(model) }
-                    } label: {
-                        Label("Load Model", systemImage: "arrow.up.right.circle")
-                    }
-                } else {
-                    Button {
-                        // Already loaded
-                    } label: {
-                        Label("Loaded", systemImage: "checkmark.seal.fill")
-                    }
-                    .disabled(true)
-                }
-                
-                Divider()
-                
-                // Delete
-                Button {
-                    modelToDelete = model
-                    showDeleteAlert = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-                .foregroundStyle(.red)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(downloadingModelId != nil)
-        }
-        .padding(.vertical, 4)
-    }
-
-    // MARK: - Search Results Section
-
-    private var searchResultsSection: some View {
-        Section {
-            ForEach(searchResults) { model in
-                searchResultRow(model)
-            }
-        } header: {
-            Text("Available Models (\(searchResults.count))")
-        }
+    private func performSearch() {
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        Task { await manager?.searchModels(query: searchQuery) }
     }
     
-    private func searchResultRow(_ model: HFModel) -> some View {
-        let isDownloading = downloadingModelId == model.id
-        
-        return HStack(spacing: 12) {
-            Image(systemName: model.isWhisperCompatible ? "waveform.circle.fill" : "brain.head.profile")
-                .font(.title2)
-                .foregroundStyle(model.isWhisperCompatible ? .blue : .purple)
-                .frame(width: 36)
+    private func refresh() {
+        manager?.loadLocalModels(context: modelContext)
+        manager?.updateDiskSpace()
+        diskSpace = manager?.diskSpaceAvailable ?? "..."
+    }
+}
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(model.displayName)
-                    .font(.headline)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(model.modelId)
-                        .lineLimit(1)
-                    if model.isWhisperCompatible {
-                        Text("•")
-                        Text("Whisper")
-                            .font(.caption2)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(.blue.opacity(0.15))
-                            .clipShape(Capsule())
-                    } else {
-                        Text("•")
-                        Text("ASR")
-                            .font(.caption2)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(.purple.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
+struct ModelRow: View {
+    let model: DownloadedModel
+    @ObservedObject var manager: ModelManager
+    @Environment(\.modelContext) private var modelContext
+    @State private var showDelete = false
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.displayName).font(.headline)
+                HStack(spacing: 4) {
+                    TagLabel(title: "Variante", value: model.variant)
+                    TagLabel(title: "Formato", value: model.format)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                
-                if model.likes > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "heart.fill")
-                            .font(.caption2)
-                        Text("\(model.likes)")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Circle().fill(statusColor).frame(width: 8, height: 8)
+                    Text(model.status.rawValue.capitalized).font(.caption2)
+                    Text(formatBytes(model.sizeBytes)).font(.caption2).foregroundColor(.secondary)
                 }
             }
-
             Spacer()
-
-            if isDownloading {
-                VStack(spacing: 4) {
-                    ProgressCircle(progress: downloadProgress)
-                        .frame(width: 30, height: 30)
-                    Text("\(Int(downloadProgress * 100))%")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
+            if model.status == .ready {
                 Button {
                     Task {
-                        selectedModel = model
-                        await loadVariants(for: model)
+                        guard let path = model.fullPath else { return }
+                        try await appState.transcriptionEngine.loadModel(at: path)
                     }
-                } label: {
-                    Image(systemName: "icloud.and.arrow.down")
-                        .font(.title2)
-                        .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
-                .disabled(downloadingModelId != nil)
+                } label: { Image(systemName: "play.fill").foregroundColor(.green) }
             }
+            Button { showDelete = true } label: { Image(systemName: "trash").foregroundColor(.red) }
         }
         .padding(.vertical, 4)
-    }
-
-    // MARK: - Actions
-
-    private func search() async {
-        guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        isSearching = true
-        defer { isSearching = false }
-
-        do {
-            searchResults = try await appState.modelManager.searchModels(query: searchText)
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-        }
-    }
-
-    private func loadPopular() async {
-        isSearching = true
-        defer { isSearching = false }
-
-        do {
-            searchResults = try await appState.modelManager.getPopularModels()
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-        }
-    }
-
-    private func loadVariants(for model: HFModel) async {
-        isLoadingVariants = true
-        showVariantSheet = true
-        defer { isLoadingVariants = false }
-
-        do {
-            availableVariants = try await appState.modelManager.listVariants(repoId: model.modelId)
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-            showVariantSheet = false
-        }
-    }
-
-    // Only show Core ML variants since WhisperProcessor only supports Core ML
-    private var coreMLVariants: [ModelVariant] {
-        availableVariants.filter { $0.format == .coreML }
-    }
-    
-    // Auto-select first Core ML variant if available
-    private var recommendedVariant: ModelVariant? {
-        coreMLVariants.first
-    }
-    
-    // Check if we should show a Core ML recommendation
-    private var shouldRecommendCoreML: Bool {
-        !coreMLVariants.isEmpty && availableVariants.count > coreMLVariants.count
-    }
-    
-    private func IfNoCoreMLWarning() -> some View {
-        Group {
-            if !coreMLVariants.isEmpty {
-                EmptyView()
-            } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.orange)
-                    Text("No Core ML models available")
-                        .font(.headline)
-                    Text("This model doesn't have Core ML variants. WhisperProcessor only supports Core ML (.mlmodelc) models. Try searching for a different model.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .alert("Eliminar", isPresented: $showDelete) {
+            Button("Eliminar", role: .destructive) {
+                try? manager.removeModel(model, context: modelContext)
             }
-        }
+            Button("Cancelar", role: .cancel) {}
+        } message: { Text("¿Eliminar \(model.displayName)?") }
     }
     
-    private func startDownload(variant: ModelVariant) async {
-        guard let hfModel = selectedModel else { return }
-        downloadingModelId = hfModel.id
-        downloadProgress = 0
-        downloadingName = hfModel.displayName
-
-        do {
-            let (model, stream) = try await appState.modelManager.downloadModelWithProgress(hfModel, variant: variant)
-
-            for try await progress in stream {
-                downloadProgress = progress
-            }
-
-            if downloadedModels.isEmpty {
-                model.isDefault = true
-            }
-            modelContext.insert(model)
-            searchResults.removeAll { $0.id == hfModel.id }
-
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-        }
-
-        downloadingModelId = nil
-        downloadProgress = 0
-        downloadingName = ""
-    }
-
-    private func setDefault(_ model: DownloadedModel) {
-        for m in downloadedModels { m.isDefault = false }
-        model.isDefault = true
-    }
-
-    private func setDefaultAndLoad(_ model: DownloadedModel) async {
-        setDefault(model)
-        await loadModel(model)
-    }
-
-    private func loadModel(_ model: DownloadedModel) async {
-        modelLoadState = .loading
-        
-        // Verify file exists before attempting to load
-        guard FileManager.default.fileExists(atPath: model.localPath) else {
-            modelLoadState = .error
-            errorMessage = "Model file missing at: \(model.localPath). The file may have been deleted. Please re-download the model."
-            showError = true
-            return
-        }
-        
-        do {
-            try await appState.transcriptionEngine.loadModel(at: model.localPath)
-            appState.activeModelName = model.name
-            modelLoadState = .loaded
-        } catch {
-            modelLoadState = .error
-            errorMessage = "Failed to load model: \(error.localizedDescription)"
-            showError = true
+    @EnvironmentObject private var appState: AppState
+    private var statusColor: Color {
+        switch model.status {
+        case .ready: return .green
+        case .downloading: return .blue
+        case .verifying: return .orange
+        case .failed: return .red
         }
     }
-
-    private func unloadModel() {
-        modelLoadState = .unloading
-        appState.transcriptionEngine.unloadModel()
-        appState.activeModelName = nil
-        modelLoadState = .idle
-    }
-
-    private func deleteModel(_ model: DownloadedModel) {
-        // If this model is loaded, unload it first
-        if isModelLoaded, loadedModelName == model.name {
-            unloadModel()
-        }
-        Task {
-            try? await appState.modelManager.deleteModel(model)
-            await MainActor.run { modelContext.delete(model) }
-        }
+    private func formatBytes(_ b: Int64) -> String {
+        let f = ByteCountFormatter(); f.countStyle = .file; return f.string(fromBytes: b)
     }
 }
 
-
-// MARK: - Variant Row View (extracted to avoid compiler type-check timeout)
-
-struct VariantRowView: View {
-    let variant: ModelVariant
-    let action: () -> Void
-    
+struct SearchResultRow: View {
+    let repo: HFRepoInfo
+    let onDownload: () -> Void
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: variant.format.icon)
-                    .font(.title2)
-                    .foregroundStyle(variant.format == ModelFormat.coreML ? .blue : .orange)
-                    .frame(width: 36)
-
+        Button(action: onDownload) {
+            HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(variant.quantization)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(variant.fileName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Text(repo.displayName).font(.headline)
                     HStack(spacing: 8) {
-                        Text(variant.format.badge)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(variant.format == ModelFormat.coreML ? .blue.opacity(0.15) : .orange.opacity(0.15))
-                            .clipShape(Capsule())
-                        Text(variant.fileSizeFormatted)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if let d = repo.downloads { Label("\(d)", systemImage: "arrow.down.circle").font(.caption) }
+                        if let l = repo.likes { Label("\(l)", systemImage: "heart").font(.caption) }
+                        if repo.isCoreML { TagLabel(title: "CoreML", value: "✓") }
                     }
                 }
-
                 Spacer()
-
-                Image(systemName: "icloud.and.arrow.down")
-                    .foregroundStyle(.blue)
+                Image(systemName: "arrow.down.circle").foregroundColor(.blue)
             }
             .padding(.vertical, 4)
         }
+        .buttonStyle(.plain)
     }
 }
 
-// MARK: - Model Load State
-
-enum ModelLoadState {
-    case idle
-    case loading
-    case loaded
-    case unloading
-    case error
-}
-
-// MARK: - Progress Circle
-
-struct ProgressCircle: View {
-    let progress: Double
+struct DownloadSheet: View {
+    let repo: HFRepoInfo
+    @ObservedObject var manager: ModelManager
+    let modelContext: ModelContext
+    @Binding var isPresented: Bool
+    @State private var error: String?
     
     var body: some View {
-        Circle()
-            .trim(from: 0, to: progress)
-            .stroke(style: StrokeStyle(lineWidth: 3, lineCap: .round))
-            .foregroundStyle(.blue)
-            .rotationEffect(.degrees(-90))
-            .animation(.easeInOut, value: progress)
-            .overlay {
-                Circle()
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 3)
-            }
+        VStack(spacing: 20) {
+            Text("Descargando \(repo.displayName)").font(.headline)
+            if let e = error { Text(e).foregroundColor(.red).multilineTextAlignment(.center) }
+            else { ProgressView().tint(.blue) }
+            Button(isPresented ? "Cancelar" : "Cerrar") { isPresented = false }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .onAppear { Task { do { _ = try await manager.downloadModel(repo, variant: "openai_whisper-base", context: modelContext); isPresented = false } catch { self.error = error.localizedDescription } } }
+    }
+}
+
+struct TagLabel: View {
+    let title: String
+    let value: String
+    var body: some View {
+        HStack(spacing: 2) {
+            Text(title + ":").font(.caption2).foregroundColor(.secondary)
+            Text(value).font(.caption2)
+        }
+        .padding(4).background(Color.secondary.opacity(0.1)).cornerRadius(4)
     }
 }

@@ -1,170 +1,186 @@
 import Foundation
+import WhisperKit
 import SwiftData
 
 @MainActor
-final class TranscriptionEngine {
-    private var whisperProcessor: WhisperProcessor?
+final class TranscriptionEngine: ObservableObject {
+    @Published var isTranscribing = false
+    @Published var progress: Double = 0
+    @Published var currentPhase: String = ""
+    @Published var errorMessage: String?
+    
+    private var whisperKit: WhisperKit?
     private var currentModelPath: String?
     
-    // Public accessors for UI status
-    var whisperProcessorLoaded: Bool { whisperProcessor != nil }
-    var loadedModelPath: String? { currentModelPath }
-    var modelMemoryFormatted: String {
-        guard whisperProcessor != nil else { return "N/A" }
-        return "~50 MB" // WhisperProcessor doesn't expose memory usage
-    }
+    init() {}
     
-    // MARK: - Model Loading
+    // MARK: - Load Model
     
-    func loadModel(at path: String) async throws {
-        // Unload existing model first
-        unloadModel()
-        
-        guard FileManager.default.fileExists(atPath: path) else {
-            throw EngineError.modelFileNotFound(path)
-        }
-        
-        // Validate that the path is a Core ML model directory
-        let url = URL(fileURLWithPath: path)
-        let fileExt = url.pathExtension
-        let fileName = url.lastPathComponent
-        let extLower = fileExt.lowercased()
-        let nameLower = fileName.lowercased()
-        
-        guard extLower == "mlmodelc" || nameLower.contains("mlmodelc") || extLower == "mlpackage" else {
-            let reported = extLower.isEmpty ? nameLower : extLower
-            throw EngineError.invalidModelFormat(
-                "Only Core ML models (.mlmodelc) are supported. Got: \(reported)"
-            )
-        }
+    func loadModel(at modelPath: URL) async throws {
+        currentPhase = "Cargando modelo..."
         
         do {
-            let processor = WhisperProcessor()
-            try await processor.loadModel(path: path)
-            whisperProcessor = processor
-            currentModelPath = path
-            print("[TranscriptionEngine] Model loaded: \(path)")
+            whisperKit = try WhisperKit()
+            try await whisperKit?.loadModels(inDirectory: modelPath.path())
+            currentModelPath = modelPath.path()
+            currentPhase = "Modelo cargado"
         } catch {
-            // Clean up on failure
-            whisperProcessor = nil
-            currentModelPath = nil
-            print("[TranscriptionEngine] Model load failed: \(error.localizedDescription)")
-            throw EngineError.modelLoadFailed(error.localizedDescription)
+            self.errorMessage = "Error cargando modelo: \(error.localizedDescription)"
+            throw error
         }
     }
     
-    func unloadModel() {
-        print("[TranscriptionEngine] Unloading model")
-        whisperProcessor = nil
-        currentModelPath = nil
-    }
-    
-    // MARK: - Transcription
+    // MARK: - Transcribe (View-compatible API)
     
     func transcribe(
         audioAt audioURL: URL,
         language: String?,
-        task: TranscriptionTask,
-        progressHandler: @MainActor (TranscriptionProgress) -> Void
+        task: TranscriptionTask? = nil,
+        progressHandler: ((TranscriptionProgress) -> Void)? = nil
     ) async throws -> TranscriptionResult {
-        guard let processor = whisperProcessor else {
-            throw EngineError.noModelLoaded
+        guard let whisperKit else {
+            throw TranscriptionError.modelNotLoaded
         }
         
-        let samples = try AudioProcessor().loadAudio(from: audioURL).samples
-        let whisperResult = try await processor.transcribe(samples: samples, language: language)
+        isTranscribing = true
+        progress = 0
+        currentPhase = "Preparando audio..."
+        errorMessage = nil
         
-        let segments: [Transcription.Segment] = whisperResult.segments.enumerated().map { idx, seg in
-            Transcription.Segment(
-                id: idx,
-                start: seg.start,
-                end: seg.end,
-                text: seg.text
+        progressHandler?(TranscriptionProgress(fraction: 0, phase: "Preparando audio..."))
+        
+        do {
+            // Ensure model is loaded
+            if whisperKit.modelsLoaded == false {
+                guard let path = currentModelPath else {
+                    throw TranscriptionError.modelNotLoaded
+                }
+                try await loadModel(at: URL(fileURLWithPath: path))
+            }
+            
+            currentPhase = "Transcribiendo..."
+            progressHandler?(TranscriptionProgress(fraction: 0.1, phase: "Transcribiendo..."))
+            
+            // Use WhisperKit's transcribe
+            let result = try await whisperKit.transcribe(
+                audioPath: audioURL.path()
             )
+            
+            progress = 1.0
+            currentPhase = "Completado"
+            progressHandler?(TranscriptionProgress(fraction: 1.0, phase: "Completado"))
+            isTranscribing = false
+            
+            // Convert to TranscriptionResult
+            return TranscriptionResult(
+                text: result.text,
+                segments: result.segments.map { seg in
+                    TranscriptionSegment(
+                        startTime: seg.startTime,
+                        endTime: seg.endTime,
+                        text: seg.text,
+                        tokens: seg.tokens ?? [],
+                        tokenLogProbs: seg.tokenLogProbs ?? [],
+                        temperature: seg.temperature ?? 0,
+                        avgLogProb: seg.avgLogProb ?? 0,
+                        compressionRatio: seg.compressionRatio ?? 0,
+                        noSpeechProb: seg.noSpeechProb ?? 0
+                    )
+                },
+                duration: result.duration,
+                language: result.language ?? "unknown"
+            )
+            
+        } catch {
+            self.errorMessage = "Error en transcripción: \(error.localizedDescription)"
+            isTranscribing = false
+            throw error
         }
-        
-        return TranscriptionResult(
-            text: whisperResult.text,
-            segments: segments,
-            duration: Double(samples.count) / 16000,
-            language: language ?? "auto"
-        )
     }
     
-    // MARK: - Batch Transcription
+    // MARK: - Transcribe with model + context (for ModelManager flow)
     
-    func transcribeBatch(
-        audioURLs: [URL],
-        language: String?,
-        task: TranscriptionTask,
-        progressHandler: @MainActor (TranscriptionProgress) -> Void
-    ) async throws -> [TranscriptionResult] {
-        guard let processor = whisperProcessor else {
-            throw EngineError.noModelLoaded
-        }
+    func transcribe(
+        audioURL: URL,
+        model: DownloadedModel,
+        language: String = "auto",
+        context: ModelContext
+    ) async throws -> Transcription {
+        let lang = language == "auto" ? nil : language
         
-        var results: [TranscriptionResult] = []
-        
-        for (index, url) in audioURLs.enumerated() {
-            let fileProgress = TranscriptionProgress(
-                taskId: "batch_\(index)",
-                fraction: Double(index) / Double(audioURLs.count),
-                phase: "File \(index + 1)/\(audioURLs.count)"
-            )
-            progressHandler(fileProgress)
-            
-            do {
-                let samples = try AudioProcessor().loadAudio(from: url).samples
-                let whisperResult = try await processor.transcribe(samples: samples, language: language)
-                
-                let segments: [Transcription.Segment] = whisperResult.segments.enumerated().map { idx, seg in
-                    Transcription.Segment(
-                        id: idx,
-                        start: seg.start,
-                        end: seg.end,
-                        text: seg.text
-                    )
-                }
-                
-                let result = TranscriptionResult(
-                    text: whisperResult.text,
-                    segments: segments,
-                    duration: Double(samples.count) / 16000,
-                    language: language ?? "auto"
-                )
-                results.append(result)
-            } catch {
-                print("[TranscriptionEngine] Failed to transcribe \(url.lastPathComponent): \(error)")
-                // Continue with remaining files
+        // Load model if needed
+        if whisperKit?.modelsLoaded == false {
+            guard let path = model.fullPath else {
+                throw TranscriptionError.modelNotLoaded
             }
+            try await loadModel(at: path)
         }
         
-        progressHandler(TranscriptionProgress(taskId: "batch_complete", fraction: 1.0, phase: "Complete"))
-        return results
+        let result = try await transcribe(
+            audioAt: audioURL,
+            language: lang
+        )
+        
+        let transcription = Transcription(
+            audioFileName: audioURL.lastPathComponent,
+            audioFilePath: audioURL.path(),
+            modelName: model.displayName,
+            modelVariant: model.variant,
+            language: result.language,
+            fullText: result.text,
+            duration: result.duration,
+            segments: result.segments,
+            wordTimestamps: [],
+            wordTimestampsEnabled: false,
+            useVad: false,
+            chunkSize: .default,
+            specialResults: nil
+        )
+        
+        context.insert(transcription)
+        try context.save()
+        
+        return transcription
+    }
+    
+    func cancel() {
+        isTranscribing = false
+        progress = 0
+        currentPhase = "Cancelado"
     }
 }
 
-// MARK: - Engine Errors
+// MARK: - Transcription Task
 
-enum EngineError: LocalizedError {
-    case noModelLoaded
-    case modelFileNotFound(String)
+enum TranscriptionTask: String, CaseIterable, Identifiable {
+    case transcribe = "transcribe"
+    case translate = "translate"
+    
+    var id: String { rawValue }
+    
+    var localized: String {
+        switch self {
+        case .transcribe: return "Transcribir"
+        case .translate: return "Traducir"
+        }
+    }
+}
+
+// MARK: - Errors
+
+enum TranscriptionError: LocalizedError {
+    case modelNotLoaded
+    case audioProcessingFailed(String)
     case transcriptionFailed(String)
-    case invalidModelFormat(String)
-    case modelLoadFailed(String)
     
     var errorDescription: String? {
         switch self {
-        case .noModelLoaded:
-            return "No model loaded. Please download and load a model first."
-        case .modelFileNotFound(let path):
-            return "Model file not found at: \(path)"
-        case .transcriptionFailed(let reason):
-            return "Transcription failed: \(reason)"
-        case .invalidModelFormat(let detail):
-            return "Invalid model format: \(detail). Download a Core ML (.mlmodelc) model."
-        case .modelLoadFailed(let reason):
-            return "Unable to load model: \(reason)"
+        case .modelNotLoaded:
+            return "No hay ningún modelo cargado. Descarga un modelo primero."
+        case .audioProcessingFailed(let msg):
+            return "Error procesando audio: \(msg)"
+        case .transcriptionFailed(let msg):
+            return "Error en la transcripción: \(msg)"
         }
     }
 }

@@ -435,7 +435,7 @@ struct TranscribeView: View {
         
         do {
             // Load model if needed
-            try await appState.transcriptionEngine.loadModel(at: model.localPath)
+            try await appState.transcriptionEngine.loadModel(at: model.fullPath ?? URL(fileURLWithPath: ""))
             appState.activeModelName = model.name
             
             let result = try await appState.transcriptionEngine.transcribe(

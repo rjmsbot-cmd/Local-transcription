@@ -1,24 +1,22 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
     name: "WhisperLocal",
     platforms: [
-        .iOS(.v17)
-    ],
-    products: [
-        .library(name: "WhisperLocalCore", targets: ["WhisperLocalCore"])
+        .iOS(.v17),
+        .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0")
+        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "0.7.0"),
     ],
     targets: [
-        .target(
-            name: "WhisperLocalCore",
+        .executableTarget(
+            name: "WhisperLocal",
             dependencies: [
                 .product(name: "WhisperKit", package: "WhisperKit")
             ],
-            path: "WhisperLocal/Services"
-        )
+            path: "WhisperLocal"
+        ),
     ]
 )
