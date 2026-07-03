@@ -179,6 +179,7 @@ actor HuggingFaceService {
                 do {
                     let modelsDir = try self.modelsDirectory()
                     let safeName = fileName.replacingOccurrences(of: "/", with: "_")
+                        .replacingOccurrences(of: " ", with: "_")
                     let destination = modelsDir.appendingPathComponent(safeName)
 
                     // Skip if already downloaded
@@ -202,7 +203,7 @@ actor HuggingFaceService {
 
                     for try await byte in bytes {
                         accumulator.append(byte)
-                        receivedBytes += 1
+                        receivedBytes += Int64(byte.count)
 
                         if accumulator.count >= chunkSize {
                             if FileManager.default.fileExists(atPath: destination.path) {
@@ -239,6 +240,11 @@ actor HuggingFaceService {
                         }
                     }
 
+                    // Verify file exists after download
+                    guard FileManager.default.fileExists(atPath: destination.path) else {
+                        throw HFError.downloadFailed
+                    }
+
                     continuation.yield(1.0)
                     continuation.finish()
                 } catch {
@@ -246,6 +252,7 @@ actor HuggingFaceService {
                     let modelsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                         .appendingPathComponent("WhisperModels", isDirectory: true)
                     let safeName = fileName.replacingOccurrences(of: "/", with: "_")
+                        .replacingOccurrences(of: " ", with: "_")
                     let destination = modelsDir.appendingPathComponent(safeName)
                     if FileManager.default.fileExists(atPath: destination.path) {
                         try? FileManager.default.removeItem(at: destination)
@@ -377,6 +384,7 @@ enum HFError: LocalizedError {
     case rateLimited
     case accessDenied
     case noCompatibleFile
+    case downloadFailed
 
     var errorDescription: String? {
         switch self {
@@ -385,6 +393,7 @@ enum HFError: LocalizedError {
         case .rateLimited: return "Rate limited by HuggingFace. Try again in a minute."
         case .accessDenied: return "Access denied. The model may require authentication."
         case .noCompatibleFile: return "No compatible model file found in this repository"
+        case .downloadFailed: return "Download completed but file not found. Please try again."
         }
     }
 }

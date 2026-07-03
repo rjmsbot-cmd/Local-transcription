@@ -56,8 +56,9 @@ actor ModelManager {
     ) async throws -> (DownloadedModel, AsyncThrowingStream<Double, Error>) {
         let stream = await hfService.downloadFileWithProgress(repoId: hfModel.modelId, fileName: variant.fileName)
 
-        // Compute the expected local path upfront
+        // Compute the expected local path upfront (must match HuggingFaceService)
         let safeName = variant.fileName.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
         let localPath = modelsDirectory.appendingPathComponent(safeName).path
 
         let displayName = variant.quantization != "Default"
