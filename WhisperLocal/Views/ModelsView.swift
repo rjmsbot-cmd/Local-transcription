@@ -197,16 +197,15 @@ struct ModelsView: View {
     // MARK: - Variant Picker Sheet
 
     private var variantPickerContent: some View {
-        if isLoadingVariants {
-            VStack(spacing: 16) {
-                ProgressView()
-                Text("Loading available variants...")
+        Group {
+            if isLoadingVariants {
+                ProgressView("Loading available variants...")
                     .foregroundStyle(.secondary)
+            } else if availableVariants.isEmpty {
+                ContentUnavailableView("No variants found", systemImage: "exclamationmark.triangle", description: Text("This model doesn't have any downloadable model files."))
+            } else {
+                variantListContent
             }
-        } else if availableVariants.isEmpty {
-            ContentUnavailableView("No variants found", systemImage: "exclamationmark.triangle", description: Text("This model doesn't have any downloadable model files."))
-        } else {
-            variantListContent
         }
     }
     
@@ -227,7 +226,7 @@ struct ModelsView: View {
             }
             
             List {
-                Section("Available Variants") {
+                Section {
                     ForEach(availableVariants) { variant in
                         VariantRowView(variant: variant) {
                             Task { await startDownload(variant: variant) }
