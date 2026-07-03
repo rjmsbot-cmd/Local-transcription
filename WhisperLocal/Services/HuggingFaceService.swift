@@ -272,15 +272,15 @@ struct ModelVariant: Identifiable, Hashable {
 
         // Detect format
         if file.isCoreML {
-            self.format = .coreML
+            self.format = ModelFormat.coreML
         } else if file.isGGUF {
-            self.format = .gguf
+            self.format = ModelFormat.gguf
         } else if file.path.hasSuffix(".onnx") {
-            self.format = .onnx
+            self.format = ModelFormat.onnx
         } else if file.path.hasSuffix(".bin") || file.path.hasSuffix(".pt") {
-            self.format = .pytorch
+            self.format = ModelFormat.pytorch
         } else {
-            self.format = .other
+            self.format = ModelFormat.other
         }
 
         // Detect quantization from filename
