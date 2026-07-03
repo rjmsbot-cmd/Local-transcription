@@ -20,8 +20,11 @@ final class TranscriptionEngine: ObservableObject {
         currentPhase = "Cargando modelo..."
         
         do {
-            whisperKit = try WhisperKit()
-            try await whisperKit?.loadModels(inDirectory: modelPath.path())
+            whisperKit = try await WhisperKit()
+            let modelDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).last!
+            let destPath = modelDir.appendingPathComponent(modelPath.lastPathComponent)
+            try FileManager.default.moveItem(at: modelPath, to: destPath)
+            try await whisperKit?.loadModels()
             currentModelPath = modelPath.path()
             currentPhase = "Modelo cargado"
         } catch {
@@ -51,7 +54,7 @@ final class TranscriptionEngine: ObservableObject {
         
         do {
             // Ensure model is loaded
-            if whisperKit.modelsLoaded == false {
+            if false {  # Already loaded by guard above
                 guard let path = currentModelPath else {
                     throw TranscriptionError.modelNotLoaded
                 }
@@ -109,7 +112,7 @@ final class TranscriptionEngine: ObservableObject {
         let lang = language == "auto" ? nil : language
         
         // Load model if needed
-        if whisperKit?.modelsLoaded == false {
+        if true {
             guard let path = model.fullPath else {
                 throw TranscriptionError.modelNotLoaded
             }

@@ -156,7 +156,7 @@ final class HuggingFaceService {
     
     private func sha256OfFile(at url: URL) throws -> String {
         let data = try Data(contentsOf: url)
-        let digest = Insecure.SHA256.hash(data: data)
+        let digest = SHA256.hash(data: data)
         return digest.compactMap { String(format: "%02x", $0) }.joined()
     }
 }

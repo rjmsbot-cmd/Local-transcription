@@ -67,7 +67,7 @@ final class Transcription {
     }
     
     private func encode<T: Codable>(_ value: T) -> String {
-        (try? JSONEncoder().encode(value).flatMap { String(bytes: $0, encoding: .utf8) }) ?? "{}"
+        (try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "{}"
     }
     
     private func decode<T: Codable>(_ json: String) -> T? {
@@ -112,12 +112,12 @@ final class TranscriptionSegment {
     
     var tokens: [Int] {
         get { (try? JSONDecoder().decode([Int].self, from: tokensJSON.data(using: .utf8)!)) ?? [] }
-        set { tokensJSON = (try? JSONEncoder().encode(newValue).flatMap { String(bytes: $0, encoding: .utf8) }) ?? "[]" }
+        set { tokensJSON = (try String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]" }
     }
     
     var tokenLogProbs: [[Double]] {
         get { (try? JSONDecoder().decode([[Double]].self, from: tokenLogProbsJSON.data(using: .utf8)!)) ?? [] }
-        set { tokenLogProbsJSON = (try? JSONEncoder().encode(newValue).flatMap { String(bytes: $0, encoding: .utf8) }) ?? "[]" }
+        set { if let data = try? JSONEncoder().encode(newValue), let str = String(data: data, encoding: .utf8) { tokenLogProbsJSON = str } else { tokenLogProbsJSON = "[]" } }
     }
 }
 
