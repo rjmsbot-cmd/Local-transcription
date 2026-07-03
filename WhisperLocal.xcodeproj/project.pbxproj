@@ -16,7 +16,6 @@
 		A1000007 /* TranscriptionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000007; };
 		A1000008 /* ModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008; };
 		A1000009 /* ExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000009; };
-		A100000A /* WhisperProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000A; };
 		A100000B /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000B; };
 		A100000C /* TranscribeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000C; };
 		A100000D /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D; };
@@ -41,7 +40,6 @@
 		A2000007 /* TranscriptionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionEngine.swift; sourceTree = "<group>"; };
 		A2000008 /* ModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelManager.swift; sourceTree = "<group>"; };
 		A2000009 /* ExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportService.swift; sourceTree = "<group>"; };
-		A200000A /* WhisperProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperProcessor.swift; sourceTree = "<group>"; };
 		A200000B /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
 		A200000C /* TranscribeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeView.swift; sourceTree = "<group>"; };
 		A200000D /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
@@ -49,7 +47,7 @@
 		A200000F /* ExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheet.swift; sourceTree = "<group>"; };
 		A2000010 /* NotesImportReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesImportReviewView.swift; sourceTree = "<group>"; };
 		A2000012 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		A2000013 /* DiskSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskSpace.swift; sourceTree = "<group>"; };
+		A2000013 /* DiskSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/DiskSpace.swift; sourceTree = "<group>"; };
 		A9500002 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>";};
 		A9500004 /* DocumentPickerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerService.swift; sourceTree = "<group>";};
 		A9500006 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerSheet.swift; sourceTree = "<group>";};
@@ -122,7 +120,6 @@
 				A2000005 /* HuggingFaceService.swift */,
 				A2000006 /* AudioProcessor.swift */,
 				A2000007 /* TranscriptionEngine.swift */,
-				A200000A /* WhisperProcessor.swift */,
 				A2000008 /* ModelManager.swift */,
 				A2000009 /* ExportService.swift */,
 			
@@ -215,7 +212,6 @@
 				A1000007 /* TranscriptionEngine.swift in Sources */,
 				A1000008 /* ModelManager.swift in Sources */,
 				A1000009 /* ExportService.swift in Sources */,
-				A100000A /* WhisperProcessor.swift in Sources */,
 				A100000B /* RootTabView.swift in Sources */,
 				A100000C /* TranscribeView.swift in Sources */,
 				A100000D /* ModelsView.swift in Sources */,
