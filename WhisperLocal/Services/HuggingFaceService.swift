@@ -41,7 +41,7 @@ actor HuggingFaceService {
     func searchModels(query: String, limit: Int = 30) async throws -> [HFModel] {
         var components = URLComponents(string: "\(baseURL)/models")!
         components.queryItems = [
-            URLQueryItem(name: "search", value: query),
+            URLQueryItem(name: "search", value: query + " coreml"),
             URLQueryItem(name: "filter", value: "automatic-speech-recognition"),
             URLQueryItem(name: "sort", value: "downloads"),
             URLQueryItem(name: "direction", value: "-1"),
@@ -87,8 +87,12 @@ actor HuggingFaceService {
     func listModelVariants(repoId: String) async throws -> [ModelVariant] {
         let files = try await listFiles(repoId: repoId)
         
+        // Collect Core ML directories (.mlmodelc, .mlpackage) as valid variants
+        let coreMLDirectories = files.filter { file in
+            file.isDirectory && (file.path.hasSuffix(".mlmodelc") || file.path.hasSuffix(".mlpackage"))
+        }
+        
         // Filter for actual model files (not directories)
-        // Include common model formats: .gguf, .safetensors, .bin, .pt, .onnx, .mlmodelc, .mlpackage
         let modelFiles = files.filter { file in
             guard !file.isDirectory else { return false }
             let path = file.path.lowercased()
@@ -103,19 +107,20 @@ actor HuggingFaceService {
                    path.hasSuffix(".tflite") ||
                    path.hasSuffix(".pb")
         }
-
-        // If no model files found, try to find any large files (>10MB) that might be models
-        var finalFiles = modelFiles
-        if modelFiles.isEmpty {
-            finalFiles = files.filter { file in
+        
+        // Combine: Core ML directories + model files
+        var allCandidates = coreMLDirectories + modelFiles
+        
+        // If no candidates found, try large files
+        if allCandidates.isEmpty {
+            allCandidates = files.filter { file in
                 guard !file.isDirectory else { return false }
-                // Large files are likely model weights
                 return (file.size ?? 0) > 10_000_000
             }
         }
 
         var variants: [ModelVariant] = []
-        for file in finalFiles {
+        for file in allCandidates {
             let variant = ModelVariant(from: file)
             variants.append(variant)
         }
