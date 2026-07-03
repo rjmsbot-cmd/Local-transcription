@@ -212,8 +212,8 @@ actor HuggingFaceService {
                         .appendingPathComponent("WhisperModels", isDirectory: true)
                     let safeName = fileName.replacingOccurrences(of: "/", with: "_")
                     let destination = modelsDir.appendingPathComponent(safeName)
-                    if let dest = destination, FileManager.default.fileExists(atPath: dest.path) {
-                        try? FileManager.default.removeItem(at: dest)
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        try? FileManager.default.removeItem(at: destination)
                     }
                     continuation.finish(throwing: error)
                 }

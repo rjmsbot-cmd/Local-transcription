@@ -209,19 +209,17 @@ struct ModelsView: View {
                     ContentUnavailableView("No variants found", systemImage: "exclamationmark.triangle", description: Text("This model doesn't have any downloadable model files."))
                 } else {
                     List {
-                        // Core ML recommendation section
-                        if shouldRecommendCoreML {
-                            Section {
-                                HStack {
-                                    Image(systemName: "lightbulb.fill")
-                                        .foregroundStyle(.blue)
-                                    Text("Core ML recommended — uses Neural Engine for faster inference")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                        Section {
+                            HStack {
+                                Image(systemName: "lightbulb.fill")
+                                    .foregroundStyle(.blue)
+                                Text("Core ML recommended — uses Neural Engine for faster inference")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .listRowBackground(Color.blue.opacity(0.05))
                         }
+                        .listRowBackground(Color.blue.opacity(0.05))
+                        .hidden(!shouldRecommendCoreML)
                         
                         Section("Available Variants") {
                             ForEach(availableVariants) { variant in

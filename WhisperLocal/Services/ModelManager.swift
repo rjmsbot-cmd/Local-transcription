@@ -115,3 +115,28 @@ actor ModelManager {
         return result
     }
 }
+
+    // MARK: - List Variants from HuggingFace
+
+    func listVariants(repoId: String) async throws -> [ModelVariant] {
+        let treeUrl = URL(string: "https://huggingface.co/api/models/\(repoId)/tree/main")!
+        let (data, response) = try await URLSession.shared.data(from: treeUrl)
+        
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw ModelManagerError.invalidResponse
+        }
+        
+        let files = try JSONDecoder().decode([HFFileItem].self, from: data)
+        
+        return files
+            .filter { $0.isDirectory == false && $0.isModelFile }
+            .map { file -> ModelVariant in
+                let format = ModelFormat.fromFileName(file.path)
+                return ModelVariant(
+                    id: file.path,
+                    fileName: (file.path as NSString).lastPathComponent,
+                    fileSize: file.size ?? file.lfs?.size,
+                    format: format
+                )
+            }
+    }
