@@ -164,9 +164,10 @@ actor HuggingFaceService {
             await progressHandler(progress)
         }
         
-        // Return the destination path
+        // Return the destination path (must match downloadFileWithProgress)
         let modelsDir = try modelsDirectory()
         let safeName = fileName.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
         return modelsDir.appendingPathComponent(safeName)
     }
 
