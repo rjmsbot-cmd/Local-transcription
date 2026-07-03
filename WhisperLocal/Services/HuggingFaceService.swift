@@ -122,7 +122,7 @@ actor HuggingFaceService {
 
         // Sort: Core ML first, then GGUF, then by size
         return variants.sorted { a, b in
-            let formatPriority: ModelFormat -> Int = { format in
+            let formatPriority: (ModelFormat) -> Int = { format in
                 switch format {
                 case .coreML: return 0
                 case .gguf: return 1
