@@ -601,7 +601,7 @@ struct ModelsView: View {
 // MARK: - Variant Row View (extracted to avoid compiler type-check timeout)
 
 struct VariantRowView: View {
-    let variant: HFModel.Variant
+    let variant: ModelVariant
     let action: () -> Void
     
     var body: some View {
@@ -609,7 +609,7 @@ struct VariantRowView: View {
             HStack(spacing: 12) {
                 Image(systemName: variant.format.icon)
                     .font(.title2)
-                    .foregroundStyle(variant.format == .coreML ? .blue : .orange)
+                    .foregroundStyle(variant.format == ModelFormat.coreML ? .blue : .orange)
                     .frame(width: 36)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -625,7 +625,7 @@ struct VariantRowView: View {
                             .font(.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(variant.format == .coreML ? .blue.opacity(0.15) : .orange.opacity(0.15))
+                            .background(variant.format == ModelFormat.coreML ? .blue.opacity(0.15) : .orange.opacity(0.15))
                             .clipShape(Capsule())
                         Text(variant.fileSizeFormatted)
                             .font(.caption)
