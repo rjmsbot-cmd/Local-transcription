@@ -66,6 +66,23 @@ final class Transcription {
         return decode(specialResultsJSON)
     }
     
+
+    // MARK: - Computed properties for ExportService compatibility
+    
+    var title: String {
+        audioFileName
+            .replacingOccurrences(of: ".wav", with: "")
+            .replacingOccurrences(of: ".m4a", with: "")
+            .replacingOccurrences(of: ".mp3", with: "")
+            .replacingOccurrences(of: ".flac", with: "")
+    }
+    
+    var detectedLanguage: String { language }
+    
+    var wordCount: Int {
+        fullText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
+    }
+
     private func encode<T: Codable>(_ value: T) -> String {
         (try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "{}"
     }
@@ -77,7 +94,7 @@ final class Transcription {
 }
 
 @Model
-final class TranscriptionSegment {
+final class TranscriptionSegment: Codable {
     var startTime: TimeInterval
     var endTime: TimeInterval
     var text: String
@@ -110,6 +127,22 @@ final class TranscriptionSegment {
         self.noSpeechProb = noSpeechProb
     }
     
+
+    // MARK: - Computed properties for ExportService compatibility
+    
+    var start: TimeInterval { startTime }
+    var end: TimeInterval { endTime }
+    
+    var startTimeFormatted: String {
+        String(format: "%02d:%02d", Int(startTime) / 60, Int(startTime) % 60)
+    }
+    
+    var endTimeFormatted: String {
+        String(format: "%02d:%02d", Int(endTime) / 60, Int(endTime) % 60)
+    }
+    
+    var id: Int { 0 }
+
     var tokens: [Int] {
         get { (try? JSONDecoder().decode([Int].self, from: tokensJSON.data(using: .utf8)!)) ?? [] }
         set { tokensJSON = (try String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]" }
@@ -122,7 +155,7 @@ final class TranscriptionSegment {
 }
 
 @Model
-final class TranscriptionWordTimestamp {
+final class TranscriptionWordTimestamp: Codable {
     var word: String
     var start: TimeInterval
     var end: TimeInterval

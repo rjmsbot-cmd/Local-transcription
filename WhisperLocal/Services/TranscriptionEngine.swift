@@ -14,16 +14,11 @@ final class TranscriptionEngine: ObservableObject {
     
     init() {}
     
-    // MARK: - Load Model
-    
     func loadModel(at modelPath: URL) async throws {
         currentPhase = "Cargando modelo..."
         
         do {
             whisperKit = try await WhisperKit()
-            let modelDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).last!
-            let destPath = modelDir.appendingPathComponent(modelPath.lastPathComponent)
-            try FileManager.default.moveItem(at: modelPath, to: destPath)
             try await whisperKit?.loadModels()
             currentModelPath = modelPath.path()
             currentPhase = "Modelo cargado"
@@ -32,8 +27,6 @@ final class TranscriptionEngine: ObservableObject {
             throw error
         }
     }
-    
-    // MARK: - Transcribe (View-compatible API)
     
     func transcribe(
         audioAt audioURL: URL,
@@ -53,28 +46,16 @@ final class TranscriptionEngine: ObservableObject {
         progressHandler?(TranscriptionProgress(fraction: 0, phase: "Preparando audio..."))
         
         do {
-            // Ensure model is loaded
-            if false {  # Already loaded by guard above
-                guard let path = currentModelPath else {
-                    throw TranscriptionError.modelNotLoaded
-                }
-                try await loadModel(at: URL(fileURLWithPath: path))
-            }
-            
             currentPhase = "Transcribiendo..."
             progressHandler?(TranscriptionProgress(fraction: 0.1, phase: "Transcribiendo..."))
             
-            // Use WhisperKit's transcribe
-            let result = try await whisperKit.transcribe(
-                audioPath: audioURL.path()
-            )
+            let result = try await whisperKit.transcribe(audioPath: audioURL.path())
             
             progress = 1.0
             currentPhase = "Completado"
             progressHandler?(TranscriptionProgress(fraction: 1.0, phase: "Completado"))
             isTranscribing = false
             
-            // Convert to TranscriptionResult
             return TranscriptionResult(
                 text: result.text,
                 segments: result.segments.map { seg in
@@ -93,15 +74,12 @@ final class TranscriptionEngine: ObservableObject {
                 duration: result.duration,
                 language: result.language ?? "unknown"
             )
-            
         } catch {
             self.errorMessage = "Error en transcripción: \(error.localizedDescription)"
             isTranscribing = false
             throw error
         }
     }
-    
-    // MARK: - Transcribe with model + context (for ModelManager flow)
     
     func transcribe(
         audioURL: URL,
@@ -111,18 +89,14 @@ final class TranscriptionEngine: ObservableObject {
     ) async throws -> Transcription {
         let lang = language == "auto" ? nil : language
         
-        // Load model if needed
-        if true {
+        if whisperKit == nil {
             guard let path = model.fullPath else {
                 throw TranscriptionError.modelNotLoaded
             }
             try await loadModel(at: path)
         }
         
-        let result = try await transcribe(
-            audioAt: audioURL,
-            language: lang
-        )
+        let result = try await transcribe(audioAt: audioURL, language: lang)
         
         let transcription = Transcription(
             audioFileName: audioURL.lastPathComponent,
@@ -153,8 +127,6 @@ final class TranscriptionEngine: ObservableObject {
     }
 }
 
-// MARK: - Transcription Task
-
 enum TranscriptionTask: String, CaseIterable, Identifiable {
     case transcribe = "transcribe"
     case translate = "translate"
@@ -168,8 +140,6 @@ enum TranscriptionTask: String, CaseIterable, Identifiable {
         }
     }
 }
-
-// MARK: - Errors
 
 enum TranscriptionError: LocalizedError {
     case modelNotLoaded
