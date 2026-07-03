@@ -86,19 +86,54 @@ actor HuggingFaceService {
 
     func listModelVariants(repoId: String) async throws -> [ModelVariant] {
         let files = try await listFiles(repoId: repoId)
-        let modelFiles = files.filter { $0.isModelFile && !$0.isDirectory }
+        
+        // Filter for actual model files (not directories)
+        // Include common model formats: .gguf, .safetensors, .bin, .pt, .onnx, .mlmodelc, .mlpackage
+        let modelFiles = files.filter { file in
+            guard !file.isDirectory else { return false }
+            let path = file.path.lowercased()
+            return path.hasSuffix(".gguf") ||
+                   path.hasSuffix(".safetensors") ||
+                   path.hasSuffix(".bin") ||
+                   path.hasSuffix(".pt") ||
+                   path.hasSuffix(".onnx") ||
+                   path.hasSuffix(".mlmodelc") ||
+                   path.hasSuffix(".mlpackage") ||
+                   path.hasSuffix(".mlmodel") ||
+                   path.hasSuffix(".tflite") ||
+                   path.hasSuffix(".pb")
+        }
+
+        // If no model files found, try to find any large files (>10MB) that might be models
+        var finalFiles = modelFiles
+        if modelFiles.isEmpty {
+            finalFiles = files.filter { file in
+                guard !file.isDirectory else { return false }
+                // Large files are likely model weights
+                return (file.size ?? 0) > 10_000_000
+            }
+        }
 
         var variants: [ModelVariant] = []
-        for file in modelFiles {
+        for file in finalFiles {
             let variant = ModelVariant(from: file)
             variants.append(variant)
         }
 
-        // Sort: Core ML first, then by size
-        // Note: we allow ALL variants now, not just Core ML
+        // Sort: Core ML first, then GGUF, then by size
         return variants.sorted { a, b in
-            if a.format == .coreML && b.format != .coreML { return true }
-            if a.format != .coreML && b.format == .coreML { return false }
+            let formatPriority: ModelFormat -> Int = { format in
+                switch format {
+                case .coreML: return 0
+                case .gguf: return 1
+                case .onnx: return 2
+                case .pytorch: return 3
+                case .other: return 4
+                }
+            }
+            let aPriority = formatPriority(a.format)
+            let bPriority = formatPriority(b.format)
+            if aPriority != bPriority { return aPriority < bPriority }
             return (a.fileSize ?? 0) < (b.fileSize ?? 0)
         }
     }

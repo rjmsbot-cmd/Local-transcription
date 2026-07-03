@@ -202,7 +202,11 @@ struct ModelsView: View {
                 ProgressView("Loading available variants...")
                     .foregroundStyle(.secondary)
             } else if availableVariants.isEmpty {
-                ContentUnavailableView("No variants found", systemImage: "exclamationmark.triangle", description: Text("This model doesn't have any downloadable model files."))
+                ContentUnavailableView(
+    "No downloadable variants",
+    systemImage: "exclamationmark.triangle",
+    description: Text("This repository doesn't contain model files (.gguf, .mlmodelc, .bin, .pt, .onnx). Try searching for a different model or check if the files are in a different branch.")
+)
             } else {
                 variantListContent
             }
@@ -573,6 +577,14 @@ struct ModelsView: View {
 
     private func loadModel(_ model: DownloadedModel) async {
         modelLoadState = .loading
+        
+        // Verify file exists before attempting to load
+        guard FileManager.default.fileExists(atPath: model.localPath) else {
+            modelLoadState = .error
+            errorMessage = "Model file missing at: \(model.localPath). The file may have been deleted. Please re-download the model."
+            showError = true
+            return
+        }
         
         do {
             try await appState.transcriptionEngine.loadModel(at: model.localPath)
