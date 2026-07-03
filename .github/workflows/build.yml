@@ -12,11 +12,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: List available Xcode versions
-        run: |
-          ls /Applications/Xcode*.app 2>/dev/null || echo "No Xcode apps found"
-          xcode-select -p
-
       - name: Select Xcode Version
         run: |
           # Try Xcode 16.2, fall back to 16.1, then 16.0
@@ -32,8 +27,55 @@ jobs:
           fi
           xcodebuild -version
 
-      - name: Build for iOS
+      - name: Build for iOS Device
         run: |
+          xcodebuild \
+            -project WhisperLocal.xcodeproj \
+            -scheme WhisperLocal \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            ENABLE_PREVIEWS=NO \
+            archive \
+            -archivePath build/WhisperLocal.xcarchive
+
+      - name: Export IPA
+        run: |
+          # Create export options for ad-hoc distribution
+          cat > exportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>uploadSymbols</key>
+              <false/>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>teamID</key>
+              <string></string>
+          </dict>
+          </plist>
+          
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/WhisperLocal.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist exportOptions.plist \
+            -allowProvisioningUpdates
+
+      - name: Fallback Direct Build
+        if: failure()
+        run: |
+          # Try direct build without archive
           xcodebuild \
             -project WhisperLocal.xcodeproj \
             -scheme WhisperLocal \
@@ -50,16 +92,24 @@ jobs:
 
       - name: Verify build output
         run: |
-          ls -la build/Build/Products/Release-iphoneos/
-          test -d "build/Build/Products/Release-iphoneos/WhisperLocal.app" || {
-            echo "ERROR: App not found!"
-            exit 1
-          }
+          ls -la build/Build/Products/Release-iphoneos/ 2>/dev/null || echo "No direct build output"
+          ls -la build/export/ 2>/dev/null || echo "No export output"
 
       - name: Create Valid IPA Structure
         run: |
+          # Try to find the app
+          if [ -d "build/export/WhisperLocal.app" ]; then
+            APP_PATH="build/export/WhisperLocal.app"
+          elif [ -d "build/Build/Products/Release-iphoneos/WhisperLocal.app" ]; then
+            APP_PATH="build/Build/Products/Release-iphoneos/WhisperLocal.app"
+          else
+            echo "ERROR: App not found!"
+            find build -name "*.app" -type d
+            exit 1
+          fi
+          
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/WhisperLocal.app Payload/
+          cp -r "$APP_PATH" Payload/
           zip -r WhisperLocal.ipa Payload
           echo "IPA size: $(du -h WhisperLocal.ipa | cut -f1)"
 
