@@ -208,19 +208,21 @@ struct ModelsView: View {
                 } else if availableVariants.isEmpty {
                     ContentUnavailableView("No variants found", systemImage: "exclamationmark.triangle", description: Text("This model doesn't have any downloadable model files."))
                 } else {
-                    List {
-                        Section {
-                            HStack {
-                                Image(systemName: "lightbulb.fill")
-                                    .foregroundStyle(.blue)
-                                Text("Core ML recommended — uses Neural Engine for faster inference")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                    if shouldRecommendCoreML {
+                        HStack {
+                            Image(systemName: "lightbulb.fill")
+                                .foregroundStyle(.blue)
+                            Text("Core ML recommended — uses Neural Engine for faster inference")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        .listRowBackground(Color.blue.opacity(0.05))
-                        .hidden(!shouldRecommendCoreML)
-                        
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color.blue.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.horizontal)
+                    }
+                    
+                    List {
                         Section("Available Variants") {
                             ForEach(availableVariants) { variant in
                                 VariantRowView(variant: variant) {

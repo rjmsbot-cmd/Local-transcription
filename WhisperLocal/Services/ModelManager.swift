@@ -99,25 +99,13 @@ actor ModelManager {
     func fileExists(_ model: DownloadedModel) -> Bool {
         FileManager.default.fileExists(atPath: model.localPath)
     }
-    
+
     func listLocalModels() -> [URL] {
         var result: [URL] = []
         guard let contents = try? FileManager.default.contentsOfDirectory(at: modelsDirectory, includingPropertiesForKeys: nil) else {
-
-    // MARK: - List Variants from HuggingFace
-
-    func listVariants(repoId: String) async throws -> [ModelVariant] {
-        let treeUrl = URL(string: "https://huggingface.co/api/models/\(repoId)/tree/main")!
-        let (data, response) = try await URLSession.shared.data(from: treeUrl)
-        
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw HuggingFaceService.HFError.invalidResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+            return result
         }
-        
-        let files = try JSONDecoder().decode([HFFileItem].self, from: data)
-        
-        return files
-            .filter { $0.isDirectory == false && $0.isModelFile }
-            .map { ModelVariant(from: $0) }
+        result = contents
+        return result
     }
 }
