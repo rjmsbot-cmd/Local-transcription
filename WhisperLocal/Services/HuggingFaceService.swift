@@ -42,7 +42,7 @@ actor HuggingFaceService {
         var components = URLComponents(string: "\(baseURL)/models")!
         components.queryItems = [
             URLQueryItem(name: "search", value: query),
-            URLQueryItem(name: "filter", value: "automatic-speech-recognition"),
+            URLQueryItem(name: "filter", value: "coreml"),
             URLQueryItem(name: "sort", value: "downloads"),
             URLQueryItem(name: "direction", value: "-1"),
             URLQueryItem(name: "limit", value: "\(limit)")
@@ -51,28 +51,84 @@ actor HuggingFaceService {
         let (data, response) = try await session.data(from: components.url!)
         try validateResponse(response)
         let all = try JSONDecoder().decode([HFModel].self, from: data)
-        // Prioritize models likely to have Core ML variants
-        return all.sorted { a, b in
+        
+        // Filter: only keep models that actually have CoreML or GGUF files
+        var compatible: [HFModel] = []
+        for model in all {
+            do {
+                let hasCompatible = try await hasCompatibleFiles(repoId: model.id)
+                if hasCompatible {
+                    compatible.append(model)
+                }
+            } catch {
+                // If we can't check, skip the model rather than show broken ones
+            }
+        }
+        
+        return compatible.sorted { a, b in
             if a.likelyHasCoreML && !b.likelyHasCoreML { return true }
             if !a.likelyHasCoreML && b.likelyHasCoreML { return false }
             return a.downloads > b.downloads
         }
+    }
+    
+    /// Check if a repo has CoreML (.mlpackage/.mlmodelc) or GGUF (.gguf) files suitable for iPhone 15 Pro
+    func hasCompatibleFiles(repoId: String) async throws -> Bool {
+        let files = try await listFiles(repoId: repoId)
+        
+        for file in files {
+            // CoreML packages/directories
+            if file.isDirectory && (file.path.hasSuffix(".mlpackage") || file.path.hasSuffix(".mlmodelc")) {
+                return true
+            }
+            // GGUF files (prefer smaller ones for iPhone)
+            if file.path.hasSuffix(".gguf") {
+                let size = file.size ?? file.lfs?.size ?? 0
+                // iPhone 15 Pro has 8GB RAM, keep models under 4GB
+                if size < 4_000_000_000 {
+                    return true
+                }
+            }
+            // CoreML files
+            if file.path.hasSuffix(".mlmodel") || file.path.hasSuffix(".mlmodelc") {
+                return true
+            }
+        }
+        return false
     }
 
     func getPopularWhisperModels() async throws -> [HFModel] {
         var components = URLComponents(string: "\(baseURL)/models")!
         components.queryItems = [
             URLQueryItem(name: "search", value: "whisper coreml"),
-            URLQueryItem(name: "filter", value: "automatic-speech-recognition"),
+            URLQueryItem(name: "filter", value: "coreml"),
             URLQueryItem(name: "sort", value: "downloads"),
             URLQueryItem(name: "direction", value: "-1"),
-            URLQueryItem(name: "limit", value: "30")
+            URLQueryItem(name: "limit", value: "50")
         ]
 
         let (data, response) = try await session.data(from: components.url!)
         try validateResponse(response)
         let all = try JSONDecoder().decode([HFModel].self, from: data)
-        return all.filter { $0.isWhisperCompatible }
+        
+        // Filter: only keep models that actually have CoreML or GGUF files for iPhone 15 Pro
+        var compatible: [HFModel] = []
+        for model in all where model.isWhisperCompatible {
+            do {
+                let hasCompatible = try await hasCompatibleFiles(repoId: model.id)
+                if hasCompatible {
+                    compatible.append(model)
+                }
+            } catch {
+                // Skip models we can't verify
+            }
+        }
+        
+        return compatible.sorted { a, b in
+            if a.likelyHasCoreML && !b.likelyHasCoreML { return true }
+            if !a.likelyHasCoreML && b.likelyHasCoreML { return false }
+            return a.downloads > b.downloads
+        }
     }
 
     // MARK: - Model Files
