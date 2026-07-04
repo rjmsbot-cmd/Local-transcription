@@ -26,7 +26,7 @@
 		A100000F /* ExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F; };
 		A1000010 /* NotesImportReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010; };
 		A1000012 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012; };
-		A1000013 /* DiskSpace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013; };
+		A1000014 /* DiskSpace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000016; };
 		A1000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000011; };
 		A9500003 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500002 /* TranscriptionTypes.swift */;};
 		A9500005 /* DocumentPickerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500004 /* DocumentPickerService.swift */;};
@@ -52,7 +52,7 @@
 		A200000F /* ExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheet.swift; sourceTree = "<group>"; };
 		A2000010 /* NotesImportReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesImportReviewView.swift; sourceTree = "<group>"; };
 		A2000012 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		A2000013 /* DiskSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperLocal/Utilities/DiskSpace.swift; sourceTree = "<group>"; };
+		A2000016 /* DiskSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Utilities/DiskSpace.swift; sourceTree = "<group>"; };
 		A9500002 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>";};
 		A9500004 /* DocumentPickerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerService.swift; sourceTree = "<group>";};
 		A3000001 /* WhisperLocal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhisperLocal.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -226,7 +226,7 @@
 				A100000F /* ExportSheet.swift in Sources */,
 				A1000010 /* NotesImportReviewView.swift in Sources */,
 				A1000012 /* SettingsView.swift in Sources */,
-				A1000013 /* DiskSpace.swift in Sources */, 
+				A1000014 /* DiskSpace.swift in Sources */, 
 			
 				A9500003 /* TranscriptionTypes.swift in Sources */,
 				A9500005 /* DocumentPickerService.swift in Sources */,
