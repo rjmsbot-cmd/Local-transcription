@@ -193,9 +193,9 @@ struct TranscribeView: View {
                         .foregroundStyle(.orange)
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Importar desde Notas")
+                        Text("Importar archivo de texto")
                             .font(.headline)
-                        Text("Importar texto desde iOS Notes")
+                        Text(".txt, .rtf, .md...")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -284,6 +284,8 @@ struct TranscribeView: View {
     
     private var startButton: some View {
         Button {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             Task { await startTranscription() }
         } label: {
             HStack {
@@ -406,6 +408,8 @@ struct TranscribeView: View {
             transcriptionTitle = audioFileName
             transcriptionResult = nil
             
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             Task {
                 audioDuration = (try? appState.audioProcessor.getAudioDuration(at: tempURL)) ?? 0
             }
@@ -480,6 +484,8 @@ struct TranscribeView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             Task {
                 do {
                     let data = try Data(contentsOf: url)

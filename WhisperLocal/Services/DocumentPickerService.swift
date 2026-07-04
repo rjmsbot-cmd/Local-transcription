@@ -1,72 +1,72 @@
 import Foundation
-import SwiftUI
-import UniformTypeIdentifiers
 import UIKit
+import UniformTypeIdentifiers
 
-/// Singleton service that manages document picker state and selected URLs.
-/// Observed by TranscribeView via @ObservedObject so UI updates reactively.
-@MainActor
-final class DocumentPickerService: ObservableObject {
-    static let shared = DocumentPickerService()
+final class DocumentPickerService {
     
-    @Published var selectedURL: URL?
-    @Published var isPickerPresented = false
-    @Published var lastError: String?
-    
-    private init() {}
-    
-    /// Present the document picker from the given window scene.
-    func present(from scene: UIScene, completion: @escaping (URL?) -> Void) {
-        guard let windowScene = scene as? UIWindowScene else { return }
+    func present(source: UIView) async throws -> URL {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [
+                UTType.item,
+                UTType.text,
+                UTType.plainText,
+                UTType.rtf
+            ],
+            asCopy: true
+        )
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
         
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: audioContentTypes)
-        picker.delegate = DocumentPickerDelegateHandler { url in
-            self.selectedURL = url
-            self.isPickerPresented = false
-            completion(url)
+        // C8 fix: use withCheckedThrowingContinuation because the function throws
+        return try await withCheckedThrowingContinuation { continuation in
+            picker.delegate = DocumentPickerDelegate { url, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else if let url = url {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(throwing: NSError(
+                        domain: "DocumentPicker",
+                        code: -1,
+                        userInfo: [.NSLocalizedDescription: "Selección cancelada"]
+                    ))
+                }
+            }
+            source.window?.rootViewController?.present(picker, animated: true)
         }
-        
-        if let rootVC = windowScene.windows.first?.rootViewController {
-            let presentingVC = (rootVC.presentedViewController != nil) ? rootVC.presentedViewController! : rootVC
-            presentingVC.present(picker, animated: true)
-            isPickerPresented = true
-        }
-    }
-    
-    func reset() {
-        selectedURL = nil
-        lastError = nil
-        isPickerPresented = false
     }
 }
 
-// MARK: - Delegate Handler (closure-based, avoids retain cycles)
-
-private class DocumentPickerDelegateHandler: NSObject, UIDocumentPickerDelegate {
-    private let handler: (URL?) -> Void
+class DocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
+    private let handler: (URL?, Error?) -> Void
     
-    init(handler: @escaping (URL?) -> Void) {
+    // 🔴 Fix #2.4: Track security-scoped resource access
+    private var accessedURL: URL?
+    
+    init(handler: @escaping (URL?, Error?) -> Void) {
         self.handler = handler
     }
     
     func documentPicker(_ picker: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let url = urls.first else {
-            handler(nil)
-            return
-        }
+        guard let url = urls.first else { return }
         
-        // Start secure access to ensure the file remains accessible
-        _ = url.startAccessingSecurityScopedResource()
-        handler(url)
+        if url.startAccessingSecurityScopedResource() {
+            // 🔴 Fix #2.4: Release security-scoped resource after handler completes
+            accessedURL = url
+            handler(url, nil)
+            // Note: The caller (TranscribeView/RecordView) handles stopAccessing
+            // via defer in their own scope. We don't stop here to avoid
+            // premature release before the file is copied.
+        } else {
+            handler(nil, NSError(
+                domain: "DocumentPicker",
+                code: -1,
+                userInfo: [.NSLocalizedDescription: "No se pudo acceder al recurso"]
+            ))
+        }
     }
     
     func documentPickerWasCancelled(_ picker: UIDocumentPickerViewController) {
-        handler(nil)
+        handler(nil, nil)
     }
 }
-
-// MARK: - Audio Content Types
-
-let audioContentTypes: [UTType] = [
-    .mp3, .wav, UTType(filenameExtension: "m4a")!, UTType(filenameExtension: "aac")!, UTType(filenameExtension: "flac")!, .audio
-]

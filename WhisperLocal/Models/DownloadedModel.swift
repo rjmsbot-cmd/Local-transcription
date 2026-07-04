@@ -12,6 +12,7 @@ final class DownloadedModel {
     var relativePath: String
     var downloadedAt: Date
     var status: ModelStatus
+    var isDefault: Bool = false
     
     var errorMessage: String = ""
     

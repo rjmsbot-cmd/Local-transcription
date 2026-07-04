@@ -84,10 +84,12 @@ WhisperLocal/
 3. Envía el .ipa a tu iPhone (email, AirDrop, Files...)
 4. En AltStore → "My Apps" → "+" → selecciona el .ipa
 
-### Opción C: TrollStore (iOS 14-17 con exploit compatible)
+### Opción C: TrollStore (solo iOS ≤17.0)
 
 1. Instala TrollStore: https://github.com/opa334/TrollStore
 2. Abre el .ipa con TrollStore → instalación sin firma
+
+> ⚠️ **Importante**: TrollStore solo funciona en iOS 14.0–17.0. En iOS 17.0.1+ Apple parcheó el exploit. No intentes instalarlo en versiones superiores.
 
 ### ⚠️ Notas sobre sideloading
 

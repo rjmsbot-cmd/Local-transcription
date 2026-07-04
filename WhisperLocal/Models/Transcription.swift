@@ -95,6 +95,35 @@ final class Transcription {
 
 @Model
 final class TranscriptionSegment: Codable {
+    enum CodingKeys: String, CodingKey {
+        case startTime, endTime, text, tokens, tokenLogProbs, temperature, avgLogProb, compressionRatio, noSpeechProb
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startTime = try container.decode(TimeInterval.self, forKey: .startTime)
+        endTime = try container.decode(TimeInterval.self, forKey: .endTime)
+        text = try container.decode(String.self, forKey: .text)
+        tokens = try container.decode([Int].self, forKey: .tokens)
+        tokenLogProbs = try container.decode([[Double]].self, forKey: .tokenLogProbs)
+        temperature = try container.decode(Double.self, forKey: .temperature)
+        avgLogProb = try container.decode(Double.self, forKey: .avgLogProb)
+        compressionRatio = try container.decode(Double.self, forKey: .compressionRatio)
+        noSpeechProb = try container.decode(Double.self, forKey: .noSpeechProb)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(startTime, forKey: .startTime)
+        try container.encode(endTime, forKey: .endTime)
+        try container.encode(text, forKey: .text)
+        try container.encode(tokens, forKey: .tokens)
+        try container.encode(tokenLogProbs, forKey: .tokenLogProbs)
+        try container.encode(temperature, forKey: .temperature)
+        try container.encode(avgLogProb, forKey: .avgLogProb)
+        try container.encode(compressionRatio, forKey: .compressionRatio)
+        try container.encode(noSpeechProb, forKey: .noSpeechProb)
+    }
     var startTime: TimeInterval
     var endTime: TimeInterval
     var text: String
@@ -141,8 +170,6 @@ final class TranscriptionSegment: Codable {
         String(format: "%02d:%02d", Int(endTime) / 60, Int(endTime) % 60)
     }
     
-    var id: Int { 0 }
-
     var tokens: [Int] {
         get { (try? JSONDecoder().decode([Int].self, from: tokensJSON.data(using: .utf8)!)) ?? [] }
         set { tokensJSON = (try String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]" }
@@ -156,6 +183,23 @@ final class TranscriptionSegment: Codable {
 
 @Model
 final class TranscriptionWordTimestamp: Codable {
+    enum CodingKeys: String, CodingKey {
+        case word, start, end
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        word = try container.decode(String.self, forKey: .word)
+        start = try container.decode(TimeInterval.self, forKey: .start)
+        end = try container.decode(TimeInterval.self, forKey: .end)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(word, forKey: .word)
+        try container.encode(start, forKey: .start)
+        try container.encode(end, forKey: .end)
+    }
     var word: String
     var start: TimeInterval
     var end: TimeInterval

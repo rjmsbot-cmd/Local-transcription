@@ -77,7 +77,8 @@ final class ModelManager: ObservableObject {
     func downloadModel(
         _ repo: HFRepoInfo,
         variant: String,
-        context: ModelContext
+        context: ModelContext,
+        progress: ((Double, String) -> Void)? = nil
     ) async throws -> DownloadedModel {
         // Check disk space first
         let estimatedSize: Int64 = 2_000_000_000 // ~2GB estimate for Core ML Whisper
@@ -107,9 +108,12 @@ final class ModelManager: ObservableObject {
             let mlPackageDir = "\(variant).mlpackage"
             _ = try await HuggingFaceService.shared.downloadDirectory(
                 repoId: repo.modelId,
-                remoteDir: mlPackageDir,
-                to: localDir,
-                progress: { _ in }
+                directoryPath: mlPackageDir,
+                expectedSha256: nil,
+                destinationURL: localDir,
+                progress: { fraction in
+                    progress?(fraction, "Descargando modelo...\n\(String(format: "%.0f%%", fraction * 100))")
+                }
             )
             
             // Update status

@@ -130,9 +130,9 @@ struct ExportService {
             "model": t.modelName,
             "word_count": t.wordCount,
             "full_text": t.fullText,
-            "segments": t.segments.map { seg -> [String: Any] in
+            "segments": t.segments.enumerated().map { i, seg -> [String: Any] in
                 [
-                    "id": seg.id,
+                    "id": i + 1,
                     "start": seg.start,
                     "end": seg.end,
                     "duration": seg.end - seg.start,
@@ -147,9 +147,9 @@ struct ExportService {
     
     private static func exportCSV(_ t: Transcription) -> Data {
         var csv = "id,start_seconds,end_seconds,duration_seconds,text\n"
-        for seg in t.segments {
+        for (i, seg) in t.segments.enumerated() {
             let escaped = seg.text.replacingOccurrences(of: "\"", with: "\"\"")
-            csv += "\(seg.id),\(String(format: "%.3f", seg.start)),\(String(format: "%.3f", seg.end)),\(String(format: "%.3f", seg.end - seg.start)),\"\(escaped)\"\n"
+            csv += "\(i + 1),\(String(format: "%.3f", seg.start)),\(String(format: "%.3f", seg.end)),\(String(format: "%.3f", seg.end - seg.start)),\"\(escaped)\"\n"
         }
         // FIX: UTF-8 BOM for Excel compatibility
         let bom = "\u{FEFF}"
@@ -172,7 +172,7 @@ struct ExportService {
         if !t.segments.isEmpty {
             md += "## Timestamped Segments\n\n"
             md += "| Time | Text |\n|------|------|\n"
-            for seg in t.segments {
+            for (i, seg) in t.segments.enumerated() {
                 let escaped = seg.text.replacingOccurrences(of: "|", with: "\\|")
                 md += "| `\(seg.startTimeFormatted)` | \(escaped) |\n"
             }

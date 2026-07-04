@@ -1,9 +1,7 @@
-// Disk space utilities for download validation
-
 import Foundation
 
 enum DiskSpaceError: LocalizedError {
-    case insufficientSpace(required: ByteCount, available: ByteCount)
+    case insufficientSpace(required: Int64, available: Int64)
     case unknown
     
     var errorDescription: String? {
@@ -15,38 +13,43 @@ enum DiskSpaceError: LocalizedError {
         }
     }
     
-    private func formatBytes(_ bytes: ByteCount) -> String {
+    private func formatBytes(_ bytes: Int64) -> String {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
-        return formatter.string(fromBytes: bytes.int64)
+        return formatter.string(fromByteCount: bytes)
     }
 }
 
-enum DiskSpace {
-    static func availableBytes() throws -> Int64 {
-        guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            throw DiskSpaceError.unknown
-        }
-        let attrs = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return attrs.volumeAvailableCapacityForImportantUsage ?? 0
-    }
+struct DiskSpace {
+    static let requiredForModelDownload: Int64 = 500 * 1024 * 1024 // 500 MB
     
-    static func ensureSpace(for requiredBytes: Int64, safetyMargin: Double = 0.15) throws -> Int64 {
-        let available = try availableBytes()
-        let needed = Int64(Double(requiredBytes) * (1 + safetyMargin))
-        guard available >= needed else {
-            throw DiskSpaceError.insufficientSpace(required: requiredBytes, available: available)
+    static func available() -> Int64 {
+        do {
+            let attrs = try FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory())
+            if let freeSpace = attrs[.systemFreeSize] as? Int64 {
+                return freeSpace
+            }
+        } catch {
+            // Fallback
         }
-        return available
+        return Int64.max
     }
     
     static func availableFormatted() -> String {
-        do {
-            let formatter = ByteCountFormatter()
-            formatter.countStyle = .file
-            return formatter.string(fromBytes: try availableBytes())
-        } catch {
-            return "Desconocido"
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: available())
+    }
+    
+    static func validate(required: Int64 = requiredForModelDownload) throws {
+        let avail = available()
+        if avail < required {
+            throw DiskSpaceError.insufficientSpace(required: required, available: avail)
         }
+    }
+    
+    /// Convenience: check and throw if insufficient disk space (C5 fix)
+    static func ensureSpace(for required: Int64 = requiredForModelDownload) throws {
+        try validate(required: required)
     }
 }

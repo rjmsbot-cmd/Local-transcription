@@ -8,6 +8,8 @@ struct SettingsView: View {
     @AppStorage("defaultLanguage") private var defaultLanguage = "auto"
     @AppStorage("defaultExportFormat") private var defaultExportFormat = "txt"
     @AppStorage("hapticEnabled") private var hapticEnabled = true
+    // HF token for gated repos (stored in UserDefaults, encrypted at rest)
+    @AppStorage("hfToken") private var hfToken = ""
     @State private var showAbout = false
     
     private var isModelLoaded: Bool {
@@ -107,6 +109,25 @@ struct SettingsView: View {
                     )
                 }
                 
+                // HuggingFace
+                Section("HuggingFace") {
+                    SecureField("HF Token (for gated models)", text: $hfToken)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                    
+                    Text("Optional: Enter your HuggingFace access token to download gated models. Stored locally on device.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    if !hfToken.isEmpty {
+                        Button("Clear Token") {
+                            hfToken = ""
+                            HuggingFaceService.authToken = ""
+                        }
+                        .foregroundStyle(.red)
+                    }
+                }
+                
                 // Preferences
                 Section("Preferences") {
                     Picker("Default Language", selection: $defaultLanguage) {
@@ -155,12 +176,26 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showAbout) { AboutView() }
+            .onAppear { syncHFToken() }
         }
     }
     
     private func unloadModel() {
         appState.transcriptionEngine.unloadModel()
         appState.activeModelName = nil
+    }
+    
+    // Sync HF token to service on appear
+    private func syncHFToken() {
+        HuggingFaceService.authToken = hfToken
+    }
+}
+
+extension SettingsView {
+    // Observe token changes and sync to service
+    var hfTokenSync: some View {
+        EmptyView()
+            .onAppear { syncHFToken() }
     }
 }
 

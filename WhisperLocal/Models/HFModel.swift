@@ -8,11 +8,20 @@ struct HFModel: Identifiable, Codable, Hashable {
     let author: String?
     let pipelineTag: String?
     let tags: [String]?
-    let downloads: Int
-    let likes: Int
+    let downloads: Int?
+    let likes: Int?
     let lastModified: String?
     
+    /// Full display name (author/modelId or just modelId)
     var displayName: String {
+        if let author = author {
+            return "\(author)/\(modelId)"
+        }
+        return modelId
+    }
+    
+    /// Short name (just the model part after the last /)
+    var shortName: String {
         modelId.split(separator: "/").last.map(String.init) ?? modelId
     }
     
@@ -43,30 +52,38 @@ struct HFModel: Identifiable, Codable, Hashable {
     }
 }
 
-struct HFFileItem: Codable {
-    let path: String
-    let type: String
-    let size: Int64?
-    let lfs: HFLFSInfo?
-    
-    var isDirectory: Bool { type == "directory" }
-    
+/// Typealias used by ModelManager/ModelsView (resolves C2 — "Cannot find type 'HFRepoInfo'")
+typealias HFRepoInfo = HFModel
+
+extension HFModel {
+    /// Whether this repo likely has downloadable Core ML model files
     var isCoreML: Bool {
-        path.hasSuffix(".mlpackage") || path.hasSuffix(".mlmodelc")
-    }
-    
-    var isGGUF: Bool { path.hasSuffix(".gguf") }
-    
-    var isModelFile: Bool {
-        path.hasSuffix(".bin") || path.hasSuffix(".pt") || 
-        path.hasSuffix(".onnx") || isCoreML || isGGUF ||
-        path.hasSuffix(".mlmodel")
+        likelyHasCoreML || isWhisperCompatible
     }
 }
 
-struct HFLFSInfo: Codable {
-    let oid: String?
-    let size: Int64?
-    let pointerSize: Int?
+// MARK: - HF File Tree Types
+
+struct HFModelFile: Identifiable, Codable, Hashable {
+    let id: String
+    let path: String
+    let size: Int?
+    let type: String // "file" or "directory"
+    let lfs: LFSPayload?
+    
+    var isDirectory: Bool { type == "directory" }
+    var displayName: String { path.split(separator: "/").last?.description ?? path }
+    
+    struct LFSPayload: Codable, Hashable {
+        let sha256: String
+        let size: Int
+        let pointerSize: Int
+    }
 }
+
+/// Legacy alias for compatibility with older code that references HFFileItem
+typealias HFFileItem = HFModelFile
+
+/// Legacy alias for LFS info
+typealias HFLFSInfo = HFModelFile.LFSPayload
 

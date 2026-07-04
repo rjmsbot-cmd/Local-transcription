@@ -7,8 +7,10 @@ struct ModelsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var manager: ModelManager?
     @State private var searchQuery = ""
+    @State private var coremlOnly = true // F5: filter toggle for CoreML-compatible models
     @State private var selectedModel: HFRepoInfo?
     @State private var showDownloadSheet = false
+    @State private var showVariantSelector = false
     @State private var diskSpace: String = ""
     
     var body: some View {
@@ -24,6 +26,22 @@ struct ModelsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Task { refresh() } } label: { Image(systemName: "arrow.clockwise") }
+            }
+        }
+        .sheet(isPresented: $showVariantSelector) {
+            if let repo = selectedModel {
+                VariantSelectorSheet(
+                    repo: repo,
+                    manager: manager!,
+                    modelContext: modelContext,
+                    onVariantSelected: { variant in
+                        showVariantSelector = false
+                        showDownloadSheet = true
+                    },
+                    onCancel: {
+                        showVariantSelector = false
+                    }
+                )
             }
         }
         .sheet(isPresented: $showDownloadSheet) {
@@ -49,6 +67,24 @@ struct ModelsView: View {
             .background(Color.secondary.opacity(0.1))
             .cornerRadius(10)
             .padding(.horizontal)
+            
+            // F5: CoreML compatibility filter toggle
+            HStack {
+                Toggle(isOn: $coremlOnly) {
+                    Text("Solo CoreML")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .toggleStyle(.switch)
+                Spacer()
+                if !coremlOnly {
+                    Text("Mostrando todos los modelos")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 4)
             .padding(.top, 8)
             
             HStack {
@@ -79,12 +115,13 @@ struct ModelsView: View {
                             }
                         }
                     }
-                    if !manager!.availableModels.isEmpty {
-                        Section("Resultados (\(manager!.availableModels.count))") {
-                            ForEach(manager!.availableModels) { repo in
+                    let filtered = coremlOnly ? manager!.availableModels.filter({ $0.isCoreML }) : manager!.availableModels
+                    if !filtered.isEmpty {
+                        Section("Resultados (\(filtered.count))") {
+                            ForEach(filtered) { repo in
                                 SearchResultRow(repo: repo) {
                                     selectedModel = repo
-                                    showDownloadSheet = true
+                                    showVariantSelector = true
                                 }
                             }
                         }
@@ -157,7 +194,7 @@ struct ModelRow: View {
         }
     }
     private func formatBytes(_ b: Int64) -> String {
-        let f = ByteCountFormatter(); f.countStyle = .file; return f.string(fromBytes: b)
+        let f = ByteCountFormatter(); f.countStyle = .file; return f.string(fromByteCount: b)
     }
 }
 
@@ -184,23 +221,205 @@ struct SearchResultRow: View {
     }
 }
 
+struct VariantSelectorSheet: View {
+    let repo: HFRepoInfo
+    let manager: ModelManager
+    let modelContext: ModelContext
+    let onVariantSelected: (String) -> Void
+    let onCancel: () -> Void
+    
+    @State private var variants: [HFModelFile] = []
+    @State private var selectedVariant: String?
+    @State private var isLoading = true
+    @State private var error: String?
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if isLoading {
+                    ProgressView("Cargando variantes...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let e = error {
+                    ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(e))
+                } else if variants.isEmpty {
+                    ContentUnavailableView(
+                        "Sin variantes CoreML",
+                        systemImage: "brain",
+                        description: Text("Este repositorio no tiene modelos .mlpackage/.mlmodelc compatibles con iOS.")
+                    )
+                } else {
+                    List {
+                        ForEach(variants) { variant in
+                            VariantRow(
+                                variant: variant,
+                                isSelected: selectedVariant == variant.displayName,
+                                onTap: { selectedVariant = variant.displayName }
+                            )
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                    
+                    // Bottom action bar
+                    VStack(spacing: 12) {
+                        if let selected = selectedVariant {
+                            Text("Seleccionado: \(selected)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button("Descargar \(selected)") {
+                                onVariantSelected(selected)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Text("Selecciona una variante para continuar")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button("Descargar") { }
+                                .buttonStyle(.borderedProminent)
+                                .frame(maxWidth: .infinity)
+                                .disabled(true)
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGroupedBackground))
+                }
+            }
+            .navigationTitle("Cuantización: \(repo.displayName)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { onCancel() }
+                }
+            }
+            .task {
+                await loadVariants()
+            }
+        }
+    }
+    
+    private func loadVariants() async {
+        do {
+            let files = try await HuggingFaceService.shared.listModelVariants(repoId: repo.modelId)
+            // Filter to only .mlpackage directories (the actual model variants)
+            let mlpackageVariants = files.filter { $0.isDirectory && $0.path.lowercased().contains("mlpackage") }
+            await MainActor.run {
+                self.variants = mlpackageVariants.isEmpty ? files : mlpackageVariants
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.isLoading = false
+            }
+        }
+    }
+}
+
+struct VariantRow: View {
+    let variant: HFModelFile
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(variant.displayName)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    if let size = variant.size {
+                        Text(formatBytes(Int64(size)))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.blue)
+                        .font(.title2)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+        .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
+    }
+    
+    private func formatBytes(_ b: Int64) -> String {
+        let f = ByteCountFormatter(); f.countStyle = .file; return f.string(fromByteCount: b)
+    }
+}
+
 struct DownloadSheet: View {
+    // F4 fix: derive variant from repo modelId instead of hardcoded "openai_whisper-base"
+    private static func deriveVariant(from repo: HFRepoInfo) -> String {
+        // Convert "author/model-name" → "author_model-name" (matches .mlpackage convention)
+        repo.modelId.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "-")
+    }
+    
     let repo: HFRepoInfo
     @ObservedObject var manager: ModelManager
     let modelContext: ModelContext
     @Binding var isPresented: Bool
     @State private var error: String?
+    // Download progress bar fix: track real progress (0.0–1.0)
+    @State private var downloadProgress: Double = 0
+    @State private var downloadPhase: String = "Preparando..."
     
     var body: some View {
         VStack(spacing: 20) {
             Text("Descargando \(repo.displayName)").font(.headline)
-            if let e = error { Text(e).foregroundColor(.red).multilineTextAlignment(.center) }
-            else { ProgressView().tint(.blue) }
+            
+            // Progress phase label
+            Text(downloadPhase)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            if let e = error {
+                Text(e)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .font(.caption)
+            } else {
+                // Deterministic progress bar with percentage
+                VStack(spacing: 8) {
+                    ProgressView(value: downloadProgress)
+                        .tint(.blue)
+                        .frame(width: 200)
+                    Text(String(format: "%.0f%%", downloadProgress * 100))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
             Button(isPresented ? "Cancelar" : "Cerrar") { isPresented = false }
                 .buttonStyle(.borderedProminent)
         }
         .padding()
-        .onAppear { Task { do { _ = try await manager.downloadModel(repo, variant: "openai_whisper-base", context: modelContext); isPresented = false } catch { self.error = error.localizedDescription } } }
+        .onAppear {
+            Task {
+                do {
+                    downloadPhase = "Descargando..."
+                    downloadProgress = 0
+                    try await manager.downloadModel(
+                        repo,
+                        variant: Self.deriveVariant(from: repo),
+                        context: modelContext,
+                        progress: { fraction, phase in
+                            downloadProgress = fraction
+                            downloadPhase = phase
+                        }
+                    )
+                    isPresented = false
+                } catch {
+                    self.error = error.localizedDescription
+                    downloadPhase = "Error"
+                }
+            }
+        }
     }
 }
 

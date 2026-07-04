@@ -6,7 +6,7 @@ struct RootTabView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            TranscribeView()
+            RecordView()
                 .tabItem {
                     Label("Record", systemImage: "mic")
                 }
