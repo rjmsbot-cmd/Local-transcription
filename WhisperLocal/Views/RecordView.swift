@@ -402,7 +402,7 @@ struct RecordView: View {
                 Spacer()
                 Picker("", selection: $selectedTask) {
                     ForEach(TranscriptionTask.allCases) { task in
-                        Text(task.rawValue).tag(task)
+                        Text(task.rawValue).tag(task.rawValue)
                     }
                 }
                 .pickerStyle(.segmented)

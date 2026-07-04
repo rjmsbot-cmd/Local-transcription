@@ -169,7 +169,7 @@ struct ModelRow: View {
                 Button {
                     Task {
                         guard let path = model.fullPath else { return }
-                        try await appState.transcriptionEngine.loadModel(at: path)
+                        try await appState.transcriptionEngine.loadModel(at: path.path)
                     }
                 } label: { Image(systemName: "play.fill").foregroundColor(.green) }
             }

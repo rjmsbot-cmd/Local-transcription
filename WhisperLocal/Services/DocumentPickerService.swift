@@ -28,7 +28,7 @@ final class DocumentPickerService {
                     continuation.resume(throwing: NSError(
                         domain: "DocumentPicker",
                         code: -1,
-                        userInfo: [.NSLocalizedDescription: "Selección cancelada"]
+                        userInfo: [NSLocalizedDescriptionKey: "Selección cancelada"]
                     ))
                 }
             }
@@ -61,7 +61,7 @@ class DocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
             handler(nil, NSError(
                 domain: "DocumentPicker",
                 code: -1,
-                userInfo: [.NSLocalizedDescription: "No se pudo acceder al recurso"]
+                userInfo: [NSLocalizedDescriptionKey: "No se pudo acceder al recurso"]
             ))
         }
     }

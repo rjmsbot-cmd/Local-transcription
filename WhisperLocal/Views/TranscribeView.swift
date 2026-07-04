@@ -268,7 +268,7 @@ struct TranscribeView: View {
                 Spacer()
                 Picker("", selection: $selectedTask) {
                     ForEach(TranscriptionTask.allCases) { task in
-                        Text(task.rawValue).tag(task)
+                        Text(task.rawValue).tag(task.rawValue)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -284,7 +284,7 @@ struct TranscribeView: View {
     
     private var startButton: some View {
         Button {
-            let accessing = url.startAccessingSecurityScopedResource()
+            let accessing = selectedAudioURL.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             Task { await startTranscription() }
         } label: {
@@ -408,8 +408,6 @@ struct TranscribeView: View {
             transcriptionTitle = audioFileName
             transcriptionResult = nil
             
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             Task {
                 audioDuration = (try? appState.audioProcessor.getAudioDuration(at: tempURL)) ?? 0
             }
@@ -439,7 +437,7 @@ struct TranscribeView: View {
         
         do {
             // Load model if needed
-            try await appState.transcriptionEngine.loadModel(at: model.fullPath ?? URL(fileURLWithPath: ""))
+            try await appState.transcriptionEngine.loadModel(at: model.fullPath?.path ?? "")
             appState.activeModelName = model.name
             
             let result = try await appState.transcriptionEngine.transcribe(
@@ -484,7 +482,7 @@ struct TranscribeView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
+            let accessing = selectedAudioURL.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             Task {
                 do {
