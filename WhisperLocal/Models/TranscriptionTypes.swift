@@ -58,6 +58,15 @@ struct SpecialResults: Codable {
     }
 }
 
+// MARK: - Transcription Task
+
+enum TranscriptionTask: String, CaseIterable, Identifiable {
+    case transcribe = "Transcribir"
+    case translate = "Traducir"
+
+    var id: String { rawValue }
+}
+
 // MARK: - Compatibility types (used by Views)
 
 struct TranscriptionResult {
@@ -68,6 +77,7 @@ struct TranscriptionResult {
 }
 
 struct TranscriptionProgress {
+    let taskId: String
     let fraction: Double
     let phase: String
 }

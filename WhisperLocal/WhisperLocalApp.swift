@@ -57,7 +57,7 @@ final class AppState: ObservableObject {
     /// F7 fix: recordings go to a protected directory, not the unprotected temp dir.
     static func recordingsDirectory() throws -> URL {
         let fm = FileManager.default
-        let dir = fm.urls(.documentDirectory, in: .userDomainMask).first!
+        let dir = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Recordings")
         if !fm.fileExists(atPath: dir.path) {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)

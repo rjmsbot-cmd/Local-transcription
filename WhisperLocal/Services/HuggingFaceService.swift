@@ -61,7 +61,7 @@ final class HuggingFaceService {
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [.NSLocalizedDescription: "Respuesta inválida"]))
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "Respuesta inválida"]))
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
@@ -129,7 +129,7 @@ final class HuggingFaceService {
         components.path = "/api/models/\(safeRepo)/tree/main/\(safePath)"
         
         guard let url = components.url else {
-            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [.NSLocalizedDescription: "URL inválida"]))
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"]))
         }
         
         var request = URLRequest(url: url)
@@ -139,7 +139,7 @@ final class HuggingFaceService {
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [.NSLocalizedDescription: "Respuesta inválida"]))
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "Respuesta inválida"]))
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
@@ -149,7 +149,7 @@ final class HuggingFaceService {
             if httpResponse.statusCode == 404 {
                 throw HFError.notFound
             }
-            throw HFError.networkFailed(NSError(domain: "HF", code: httpResponse.statusCode, userInfo: [.NSLocalizedDescription: "HTTP \(httpResponse.statusCode)"]))
+            throw HFError.networkFailed(NSError(domain: "HF", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(httpResponse.statusCode)"]))
         }
         
         // Handle both array and single object responses
@@ -185,7 +185,7 @@ final class HuggingFaceService {
         components.path = "/\(safeRepo)/resolve/main/\(safeFile)"
         
         guard let url = components.url else {
-            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [.NSLocalizedDescription: "URL inválida"]))
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"]))
         }
         
         var request = URLRequest(url: url)
@@ -197,7 +197,7 @@ final class HuggingFaceService {
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             try? FileManager.default.removeItem(at: tempURL)
-            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [.NSLocalizedDescription: "Descarga fallida"]))
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "Descarga fallida"]))
         }
         
         // Move to final destination
@@ -287,14 +287,14 @@ final class HuggingFaceService {
     
     func sha256OfFile(at url: URL) throws -> String {
         let fileHandle = try FileHandle(forReadingFrom: url)
+        defer { try? fileHandle.close() }
         fileHandle.seek(toOffset: 0)
         
         var hasher = SHA256()
         let chunkSize = 1024 * 1024 // 1MB chunks
         
         while true {
-            let data = try fileHandle.read(upToCount: chunkSize)
-            guard !data.isEmpty else { break }
+            guard let data = try fileHandle.read(upToCount: chunkSize), !data.isEmpty else { break }
             hasher.update(data: data)
         }
         

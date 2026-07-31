@@ -172,7 +172,7 @@ final class TranscriptionSegment: Codable {
     
     var tokens: [Int] {
         get { (try? JSONDecoder().decode([Int].self, from: tokensJSON.data(using: .utf8)!)) ?? [] }
-        set { tokensJSON = (try String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]" }
+        set { tokensJSON = (try? String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]" }
     }
     
     var tokenLogProbs: [[Double]] {

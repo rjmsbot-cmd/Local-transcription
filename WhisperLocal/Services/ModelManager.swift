@@ -90,7 +90,7 @@ final class ModelManager: ObservableObject {
         // Create DownloadedModel entry
         let model = DownloadedModel(
             name: repo.modelId,
-            author: repo.author,
+            author: repo.author ?? "",
             variant: variant,
             format: "coreml",
             sizeBytes: estimatedSize,
@@ -101,7 +101,7 @@ final class ModelManager: ObservableObject {
         try context.save()
         downloadedModels.append(model)
         
-        let localDir = try documentsDirectory().appendingPathComponent(relativePath)
+        let localDir = documentsDirectory().appendingPathComponent(relativePath)
         
         do {
             // Download the .mlpackage directory tree

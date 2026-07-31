@@ -402,7 +402,7 @@ struct RecordView: View {
                 Spacer()
                 Picker("", selection: $selectedTask) {
                     ForEach(TranscriptionTask.allCases) { task in
-                        Text(task.rawValue).tag(task.rawValue)
+                        Text(task.rawValue).tag(task)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -585,7 +585,7 @@ struct RecordView: View {
         transcriptionResult = nil
         
         do {
-            try await appState.transcriptionEngine.loadModel(at: model.fullPath ?? URL(fileURLWithPath: ""))
+            try await appState.transcriptionEngine.loadModel(at: model.fullPath?.path ?? "")
             appState.activeModelName = model.name
             
             let result = try await appState.transcriptionEngine.transcribe(

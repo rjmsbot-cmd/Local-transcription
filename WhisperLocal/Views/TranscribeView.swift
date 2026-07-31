@@ -2,7 +2,6 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 import UIKit
-import UIKit
 
 struct TranscribeView: View {
     @Environment(\.modelContext) private var modelContext
@@ -268,7 +267,7 @@ struct TranscribeView: View {
                 Spacer()
                 Picker("", selection: $selectedTask) {
                     ForEach(TranscriptionTask.allCases) { task in
-                        Text(task.rawValue).tag(task.rawValue)
+                        Text(task.rawValue).tag(task)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -284,8 +283,10 @@ struct TranscribeView: View {
     
     private var startButton: some View {
         Button {
-            let accessing = selectedAudioURL.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            if let url = selectedAudioURL {
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            }
             Task { await startTranscription() }
         } label: {
             HStack {
@@ -482,7 +483,7 @@ struct TranscribeView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            let accessing = selectedAudioURL.startAccessingSecurityScopedResource()
+            let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             Task {
                 do {

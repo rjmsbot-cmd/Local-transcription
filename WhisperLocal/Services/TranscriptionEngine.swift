@@ -102,8 +102,18 @@ final class TranscriptionEngine {
             }
         )
 
-        let segments: [Transcription.Segment] = whisperResult.segments.enumerated().map { idx, seg in
-            Transcription.Segment(id: idx, start: seg.start, end: seg.end, text: seg.text)
+        let segments: [TranscriptionSegment] = whisperResult.segments.map { seg in
+            TranscriptionSegment(
+                startTime: seg.start,
+                endTime: seg.end,
+                text: seg.text,
+                tokens: [],
+                tokenLogProbs: [],
+                temperature: 0,
+                avgLogProb: 0,
+                compressionRatio: 0,
+                noSpeechProb: 0
+            )
         }
 
         return TranscriptionResult(

@@ -2,7 +2,9 @@ import Foundation
 import UIKit
 import UniformTypeIdentifiers
 
-final class DocumentPickerService {
+final class DocumentPickerService: ObservableObject {
+    
+    static let shared = DocumentPickerService()
     
     func present(source: UIView) async throws -> URL {
         let picker = UIDocumentPickerViewController(
