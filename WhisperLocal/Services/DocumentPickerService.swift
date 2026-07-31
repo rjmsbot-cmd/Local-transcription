@@ -7,6 +7,10 @@ final class DocumentPickerService: ObservableObject {
     
     static let shared = DocumentPickerService()
     
+    // UIDocumentPickerViewController.delegate is weak: keep a strong ref
+    // so the delegate isn't deallocated before the picker finishes.
+    private var activeDelegate: DocumentPickerDelegate?
+    
     func present(source: UIView) async throws -> URL {
         let picker = UIDocumentPickerViewController(
             forOpeningContentTypes: [
@@ -22,7 +26,7 @@ final class DocumentPickerService: ObservableObject {
         
         // C8 fix: use withCheckedThrowingContinuation because the function throws
         return try await withCheckedThrowingContinuation { continuation in
-            picker.delegate = DocumentPickerDelegate { url, error in
+            let delegate = DocumentPickerDelegate { url, error in
                 if let error = error {
                     continuation.resume(throwing: error)
                 } else if let url = url {
@@ -35,6 +39,8 @@ final class DocumentPickerService: ObservableObject {
                     ))
                 }
             }
+            picker.delegate = delegate
+            activeDelegate = delegate
             source.window?.rootViewController?.present(picker, animated: true)
         }
     }

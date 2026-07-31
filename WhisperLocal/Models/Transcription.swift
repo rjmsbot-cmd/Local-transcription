@@ -48,22 +48,22 @@ final class Transcription {
         self.useVad = useVad
         self.chunkSize = chunkSize
         self.wordTimestampsEnabled = wordTimestampsEnabled
-        self.segmentsJSON = encode(segments)
-        self.wordTimestampsJSON = encode(wordTimestamps)
-        self.specialResultsJSON = specialResults != nil ? encode(specialResults!) : "{}"
+        self.segmentsJSON = Self.encode(segments)
+        self.wordTimestampsJSON = Self.encode(wordTimestamps)
+        self.specialResultsJSON = specialResults != nil ? Self.encode(specialResults!) : "{}"
     }
     
     var segments: [TranscriptionSegment] {
-        decode(segmentsJSON) ?? []
+        Self.decode(segmentsJSON) ?? []
     }
     
     var wordTimestamps: [TranscriptionWordTimestamp] {
-        decode(wordTimestampsJSON) ?? []
+        Self.decode(wordTimestampsJSON) ?? []
     }
     
     var specialResults: SpecialResults? {
         guard !specialResultsJSON.isEmpty, specialResultsJSON != "{}" else { return nil }
-        return decode(specialResultsJSON)
+        return Self.decode(specialResultsJSON)
     }
     
 
@@ -83,11 +83,11 @@ final class Transcription {
         fullText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
     }
 
-    private func encode<T: Codable>(_ value: T) -> String {
+    private static func encode<T: Codable>(_ value: T) -> String {
         (try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "{}"
     }
     
-    private func decode<T: Codable>(_ json: String) -> T? {
+    private static func decode<T: Codable>(_ json: String) -> T? {
         guard let data = json.data(using: .utf8) else { return nil }
         return (try? JSONDecoder().decode(T.self, from: data))
     }
@@ -104,8 +104,10 @@ final class TranscriptionSegment: Codable {
         startTime = try container.decode(TimeInterval.self, forKey: .startTime)
         endTime = try container.decode(TimeInterval.self, forKey: .endTime)
         text = try container.decode(String.self, forKey: .text)
-        tokens = try container.decode([Int].self, forKey: .tokens)
-        tokenLogProbs = try container.decode([[Double]].self, forKey: .tokenLogProbs)
+        let decodedTokens = try container.decode([Int].self, forKey: .tokens)
+        let decodedLogProbs = try container.decode([[Double]].self, forKey: .tokenLogProbs)
+        tokensJSON = Self.encodeJSON(decodedTokens)
+        tokenLogProbsJSON = Self.encodeJSON(decodedLogProbs)
         temperature = try container.decode(Double.self, forKey: .temperature)
         avgLogProb = try container.decode(Double.self, forKey: .avgLogProb)
         compressionRatio = try container.decode(Double.self, forKey: .compressionRatio)
@@ -148,12 +150,16 @@ final class TranscriptionSegment: Codable {
         self.startTime = startTime
         self.endTime = endTime
         self.text = text
-        self.tokens = tokens
-        self.tokenLogProbs = tokenLogProbs
+        tokensJSON = Self.encodeJSON(tokens)
+        tokenLogProbsJSON = Self.encodeJSON(tokenLogProbs)
         self.temperature = temperature
         self.avgLogProb = avgLogProb
         self.compressionRatio = compressionRatio
         self.noSpeechProb = noSpeechProb
+    }
+
+    private static func encodeJSON<T: Encodable>(_ value: T) -> String {
+        (try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "[]"
     }
     
 
