@@ -288,7 +288,7 @@ final class HuggingFaceService {
     func sha256OfFile(at url: URL) throws -> String {
         let fileHandle = try FileHandle(forReadingFrom: url)
         defer { try? fileHandle.close() }
-        fileHandle.seek(toOffset: 0)
+        try fileHandle.seek(toOffset: 0)
         
         var hasher = SHA256()
         let chunkSize = 1024 * 1024 // 1MB chunks

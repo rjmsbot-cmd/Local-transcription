@@ -404,7 +404,7 @@ struct DownloadSheet: View {
                 do {
                     downloadPhase = "Descargando..."
                     downloadProgress = 0
-                    try await manager.downloadModel(
+                    _ = try await manager.downloadModel(
                         repo,
                         variant: Self.deriveVariant(from: repo),
                         context: modelContext,

@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import AVFoundation
 
 struct RecordView: View {

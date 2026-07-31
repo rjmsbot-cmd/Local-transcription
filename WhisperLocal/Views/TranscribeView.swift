@@ -283,10 +283,8 @@ struct TranscribeView: View {
     
     private var startButton: some View {
         Button {
-            if let url = selectedAudioURL {
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            }
+            // The audio was already copied to a temp file in handleFileImport,
+            // so no security-scoped access is needed here.
             Task { await startTranscription() }
         } label: {
             HStack {

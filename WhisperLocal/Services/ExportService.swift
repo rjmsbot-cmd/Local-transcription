@@ -172,7 +172,7 @@ struct ExportService {
         if !t.segments.isEmpty {
             md += "## Timestamped Segments\n\n"
             md += "| Time | Text |\n|------|------|\n"
-            for (i, seg) in t.segments.enumerated() {
+            for seg in t.segments {
                 let escaped = seg.text.replacingOccurrences(of: "|", with: "\\|")
                 md += "| `\(seg.startTimeFormatted)` | \(escaped) |\n"
             }
