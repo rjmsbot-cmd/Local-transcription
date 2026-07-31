@@ -57,7 +57,7 @@ final class RecordingService: ObservableObject {
     
     func checkPermission() -> Bool {
         if #available(iOS 17.0, *) {
-            return AVAudioApplication.recordPermission == .granted
+            return AVAudioApplication.recordPermission == AVAudioApplication.RecordPermission.granted
         } else {
             return AVAudioSession.sharedInstance().recordPermission == .granted
         }
