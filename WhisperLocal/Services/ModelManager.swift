@@ -6,15 +6,20 @@ import SwiftUI
 final class ModelManager: ObservableObject {
     @Published var downloadedModels: [DownloadedModel] = []
     @Published var availableModels: [HFRepoInfo] = []
+    @Published var recommendedModels: [HFRepoInfo] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var diskSpaceAvailable: String = ""
+    /// True once the user has run a search; drives whether the Models tab
+    /// shows search results or the initial "Recomendados" list.
+    @Published var hasSearched = false
     
     private let modelDirName = "WhisperModels"
     
     init(modelContext: ModelContext) {
         loadLocalModels(context: modelContext)
         updateDiskSpace()
+        Task { await loadRecommendations() }
     }
     
     func updateDiskSpace() {
@@ -61,6 +66,7 @@ final class ModelManager: ObservableObject {
     // MARK: - Search
     
     func searchModels(query: String, coreMLOnly: Bool = true) async {
+        hasSearched = true
         isLoading = true
         errorMessage = nil
         do {
@@ -70,6 +76,31 @@ final class ModelManager: ObservableObject {
             availableModels = []
         }
         isLoading = false
+    }
+    
+    /// Back to the initial state: clears search results and shows the
+    /// "Recomendados" section again.
+    func resetSearch() {
+        hasSearched = false
+        availableModels = []
+        errorMessage = nil
+        isLoading = false
+    }
+    
+    /// Loads the initial "Recomendados" list (most-downloaded CoreML ASR
+    /// models). Failures are surfaced through `errorMessage` only while the
+    /// user hasn't searched yet, so a failed recommendation fetch can't
+    /// clobber search results.
+    func loadRecommendations() async {
+        guard !hasSearched else { return }
+        do {
+            let models = try await HuggingFaceService.shared.fetchRecommendedModels()
+            recommendedModels = models.filter { $0.isCoreML }
+        } catch {
+            if !hasSearched {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
     
     // MARK: - Download

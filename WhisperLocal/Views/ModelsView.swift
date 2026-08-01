@@ -29,6 +29,7 @@ struct ModelsView: View {
     @State private var coremlOnly = true // F5: filter toggle for CoreML-compatible models
     @State private var activeSheet: ModelSheet?
     @State private var diskSpace: String = ""
+    @State private var searchTask: Task<Void, Never>?
     
     var body: some View {
         Group {
@@ -83,7 +84,12 @@ struct ModelsView: View {
                     .submitLabel(.search)
                     .onSubmit { performSearch() }
                 if !searchQuery.isEmpty {
-                    Button { searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    Button {
+                        searchQuery = ""
+                        searchTask?.cancel()
+                        manager?.resetSearch()
+                        Task { await manager?.loadRecommendations() }
+                    } label: { Image(systemName: "xmark.circle.fill") }
                 }
             }
             .padding(10)
@@ -119,33 +125,61 @@ struct ModelsView: View {
             .padding(.top, 4)
             
             if manager!.isLoading {
-                ProgressView("Buscando...").frame(height: 100)
+                ProgressView(manager!.hasSearched ? "Buscando…" : "Cargando recomendados…")
+                    .frame(height: 100)
             } else if let error = manager!.errorMessage {
                 ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
                     .frame(height: 100)
-            } else if manager!.availableModels.isEmpty && manager!.downloadedModels.isEmpty {
-                ContentUnavailableView("Sin modelos", systemImage: "brain",
-                    description: Text("Busca un modelo de Whisper en Hugging Face."))
             } else {
                 List {
-                    Section("Descargados (\(manager!.downloadedModels.count))") {
-                        ForEach(manager!.downloadedModels) { model in
-                            ModelRow(model: model, manager: manager!)
-                        }
-                        .onDelete { indices in
-                            for index in indices {
-                                try? manager!.removeModel(manager!.downloadedModels[index], context: modelContext)
+                    if !manager!.downloadedModels.isEmpty {
+                        Section("Descargados (\(manager!.downloadedModels.count))") {
+                            ForEach(manager!.downloadedModels) { model in
+                                ModelRow(model: model, manager: manager!)
+                            }
+                            .onDelete { indices in
+                                for index in indices {
+                                    try? manager!.removeModel(manager!.downloadedModels[index], context: modelContext)
+                                }
                             }
                         }
                     }
-                    let filtered = coremlOnly ? manager!.availableModels.filter({ $0.isCoreML }) : manager!.availableModels
-                    if !filtered.isEmpty {
-                        Section("Resultados (\(filtered.count))") {
-                            ForEach(filtered) { repo in
+                    if manager!.hasSearched {
+                        let filtered = coremlOnly ? manager!.availableModels.filter({ $0.isCoreML }) : manager!.availableModels
+                        if !filtered.isEmpty {
+                            Section("Resultados (\(filtered.count))") {
+                                ForEach(filtered) { repo in
+                                    SearchResultRow(repo: repo) {
+                                        activeSheet = .variantPicker(repo)
+                                    }
+                                }
+                            }
+                        } else if manager!.downloadedModels.isEmpty {
+                            Section {
+                                ContentUnavailableView(
+                                    "Sin resultados",
+                                    systemImage: "magnifyingglass",
+                                    description: Text("Prueba con otro término de búsqueda.")
+                                )
+                                .padding(.vertical, 20)
+                            }
+                        }
+                    } else if !manager!.recommendedModels.isEmpty {
+                        Section("Recomendados (\(manager!.recommendedModels.count))") {
+                            ForEach(manager!.recommendedModels) { repo in
                                 SearchResultRow(repo: repo) {
                                     activeSheet = .variantPicker(repo)
                                 }
                             }
+                        }
+                    } else if manager!.downloadedModels.isEmpty {
+                        Section {
+                            ContentUnavailableView(
+                                "Sin modelos",
+                                systemImage: "brain",
+                                description: Text("Busca un modelo de Whisper en Hugging Face.")
+                            )
+                            .padding(.vertical, 20)
                         }
                     }
                 }
@@ -156,13 +190,17 @@ struct ModelsView: View {
     
     private func performSearch() {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        Task { await manager?.searchModels(query: searchQuery, coreMLOnly: coremlOnly) }
+        searchTask?.cancel()
+        searchTask = Task { await manager?.searchModels(query: searchQuery, coreMLOnly: coremlOnly) }
     }
     
     private func refresh() {
         manager?.loadLocalModels(context: modelContext)
         manager?.updateDiskSpace()
         diskSpace = manager?.diskSpaceAvailable ?? "..."
+        if !(manager?.hasSearched ?? false) {
+            Task { await manager?.loadRecommendations() }
+        }
     }
 }
 

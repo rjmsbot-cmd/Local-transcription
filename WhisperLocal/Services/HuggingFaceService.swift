@@ -101,6 +101,42 @@ final class HuggingFaceService {
         return models
     }
     
+    /// Fetches a curated list of recommended repos: the most-downloaded
+    /// CoreML-tagged automatic-speech-recognition models on the Hub.
+    /// Used as the initial content of the Models tab ("Recomendados")
+    /// so the screen is never empty before the user searches.
+    func fetchRecommendedModels(limit: Int = 20) async throws -> [HFModel] {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "huggingface.co"
+        components.path = "/api/models"
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "sort", value: "downloads"),
+            URLQueryItem(name: "direction", value: "-1"),
+            URLQueryItem(name: "pipeline_tag", value: "automatic-speech-recognition"),
+            URLQueryItem(name: "filter", value: "coreml")
+        ]
+        guard let url = components.url else {
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"]))
+        }
+        
+        var request = URLRequest(url: url)
+        if !Self.authToken.isEmpty {
+            request.setValue("Bearer \(Self.authToken)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "Respuesta inválida"]))
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if httpResponse.statusCode == 429 { throw HFError.rateLimited }
+            throw HFError.notFound
+        }
+        return try JSONDecoder().decode([HFModel].self, from: data)
+    }
+    
     // MARK: - Compatibility check (with caching)
     
     func hasCompatibleFiles(repoId: String, forceRefresh: Bool = false) async throws -> Bool {
@@ -155,7 +191,6 @@ final class HuggingFaceService {
         let rootHasDecoder = topLevel.contains { $0.path.contains("TextDecoder") && $0.isCoreMLBundleName }
         if rootHasEncoder && rootHasDecoder {
             return [HFModelFile(
-                id: "\(repoId)#root",
                 path: "",
                 size: nil,
                 type: "directory",

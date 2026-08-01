@@ -66,7 +66,9 @@ extension HFModel {
 // MARK: - HF File Tree Types
 
 struct HFModelFile: Identifiable, Codable, Hashable {
-    let id: String
+    /// The tree API does NOT return an `id` field (only `path`, `type`,
+    /// `size`, `oid`) — path is the stable unique key, so `id` is computed.
+    var id: String { path }
     let path: String
     let size: Int?
     let type: String // "file", "directory" or "symlink"
@@ -220,9 +222,11 @@ struct HFModelFile: Identifiable, Codable, Hashable {
     }
     
     struct LFSPayload: Codable, Hashable {
-        let sha256: String
+        /// Real tree API LFS payloads use `oid`, not `sha256` (verified
+        /// against huggingface.co: {"oid": …, "size": …, "pointerSize": …}).
+        let oid: String
         let size: Int
-        let pointerSize: Int
+        let pointerSize: Int?
     }
 }
 
