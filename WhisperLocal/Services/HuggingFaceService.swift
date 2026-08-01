@@ -54,10 +54,23 @@ final class HuggingFaceService {
     func searchModels(query: String, limit: Int = 20) async throws -> [HFModel] {
         guard !query.isEmpty else { return [] }
         
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let urlString = "\(Self.apiBase)/models?search=\(encoded)&limit=\(limit)&sort=likes&direction=-1"
+        // Build the query with URLComponents so special characters in the
+        // search string (&, +, ?, …) can never break the URL.
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "huggingface.co"
+        components.path = "/api/models"
+        components.queryItems = [
+            URLQueryItem(name: "search", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "sort", value: "likes"),
+            URLQueryItem(name: "direction", value: "-1")
+        ]
+        guard let url = components.url else {
+            throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"]))
+        }
         
-        var request = URLRequest(url: URL(string: urlString)!)
+        var request = URLRequest(url: url)
         if !Self.authToken.isEmpty {
             request.setValue("Bearer \(Self.authToken)", forHTTPHeaderField: "Authorization")
         }
@@ -106,24 +119,31 @@ final class HuggingFaceService {
     // MARK: - Model variants
 
     /// Returns directory-like entries that are (or contain) CoreML model
-    /// bundles. The old implementation only matched names containing
-    /// ".mlpackage", which silently dropped the main WhisperKit repo
-    /// (`argmaxinc/whisperkit-coreml_*`, whose folders are named like
-    /// `openai_whisper-base` and contain `.mlmodelc` subdirectories).
+    /// bundles.
+    ///
+    /// The old implementation only matched names containing ".mlpackage"
+    /// (silently dropping `argmaxinc/whisperkit-coreml_*`, whose folders are
+    /// named like `openai_whisper-base`), and then issued one HTTP request
+    /// per candidate directory (N+1 — slow and rate-limit prone). This
+    /// version makes a SINGLE recursive tree call and derives the variants
+    /// client-side, since the tree API returns every entry with full
+    /// repo-relative paths.
     func listModelVariants(repoId: String) async throws -> [HFModelFile] {
-        let files = try await listFiles(repoId: repoId)
-        var candidates = files.filter { $0.isDirectoryLike && $0.isCoreMLBundleName }
+        let all = try await listFiles(repoId: repoId, recursive: true)
+        
+        // Only top-level entries (no "/" in the path) can be variants.
+        let topLevel = all.filter { !$0.path.contains("/") }
         
         // Edge case: repos where the CoreML bundle lives directly at the
         // repo root (AudioEncoder/TextDecoder/MelSpectrogram .mlmodelc
         // folders, no per-variant subdirectory). Expose them as a single
         // "root bundle" variant (empty path) instead of three bogus
-        // encoder/decoder entries.
-        let hasEncoder = files.contains { $0.path.contains("AudioEncoder") && $0.isCoreMLBundleName }
-        let hasDecoder = files.contains { $0.path.contains("TextDecoder") && $0.isCoreMLBundleName }
-        let rootLooksLikeBundle = hasEncoder && hasDecoder
-        
-        if rootLooksLikeBundle {
+        // encoder/decoder entries. Must be checked on top-level entries
+        // only — with a recursive listing, nested paths under any variant
+        // also contain "AudioEncoder" and "mlmodelc".
+        let rootHasEncoder = topLevel.contains { $0.path.contains("AudioEncoder") && $0.isCoreMLBundleName }
+        let rootHasDecoder = topLevel.contains { $0.path.contains("TextDecoder") && $0.isCoreMLBundleName }
+        if rootHasEncoder && rootHasDecoder {
             return [HFModelFile(
                 id: "\(repoId)#root",
                 path: "",
@@ -133,20 +153,19 @@ final class HuggingFaceService {
             )]
         }
         
-        // Also include directory-like entries whose *contents* contain
-        // CoreML bundles (checked one level deep, cached).
-        let otherDirs = files.filter { $0.isDirectoryLike && !$0.isCoreMLBundleName }
-        for dir in otherDirs {
-            if try await hasCompatibleFiles(repoId: repoId, path: dir.path) {
-                candidates.append(dir)
-            }
+        // A top-level directory is a variant when it contains (at any
+        // depth) an entry whose path includes a CoreML bundle name.
+        let variants = topLevel.filter { dir in
+            guard dir.isDirectoryLike else { return false }
+            let prefix = dir.path + "/"
+            return all.contains { $0.path.hasPrefix(prefix) && $0.isCoreMLBundleName }
         }
-        return candidates
+        return variants
     }
 
     // MARK: - File listing
 
-    func listFiles(repoId: String, path: String = "") async throws -> [HFModelFile] {
+    func listFiles(repoId: String, path: String = "", recursive: Bool = false) async throws -> [HFModelFile] {
         // F2 fix: use the correct HF tree API endpoint
         let safeRepo = sanitizePathComponent(repoId)
         let safePath = sanitizePathComponent(path)
@@ -154,10 +173,16 @@ final class HuggingFaceService {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "huggingface.co"
+        // sanitizePathComponent already returns a percent-encoded path, so it
+        // must go into percentEncodedPath (assigning to `path` would
+        // double-encode "%" → "%25" and break URLs containing spaces etc.).
         if safePath.isEmpty {
-            components.path = "/api/models/\(safeRepo)/tree/main"
+            components.percentEncodedPath = "/api/models/\(safeRepo)/tree/main"
         } else {
-            components.path = "/api/models/\(safeRepo)/tree/main/\(safePath)"
+            components.percentEncodedPath = "/api/models/\(safeRepo)/tree/main/\(safePath)"
+        }
+        if recursive {
+            components.queryItems = [URLQueryItem(name: "recursive", value: "true")]
         }
         
         guard let url = components.url else {
@@ -220,7 +245,7 @@ final class HuggingFaceService {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "huggingface.co"
-        components.path = "/\(safeRepo)/resolve/main/\(safeFile)"
+        components.percentEncodedPath = "/\(safeRepo)/resolve/main/\(safeFile)"
         
         guard let url = components.url else {
             throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"]))
@@ -272,34 +297,57 @@ final class HuggingFaceService {
     func downloadDirectory(
         repoId: String,
         directoryPath: String,
-        expectedSha256: String?,
         destinationURL: URL,
         progress: @escaping (Double, String) -> Void
     ) async throws -> Int64 {
-        // 1) Walk the tree and collect every file (recursively).
-        var allFiles: [HFModelFile] = []
-        try await collectFiles(repoId: repoId, directoryPath: directoryPath, into: &allFiles)
-        let fileItems = allFiles.filter { !$0.isDirectory }
-        let total = fileItems.count
+        let fileItems = try await listAllFiles(repoId: repoId, path: directoryPath)
+            .filter { !$0.isDirectory }
+        guard !fileItems.isEmpty else { return 0 }
+        return try await downloadFiles(
+            repoId: repoId,
+            files: fileItems,
+            destinationURL: destinationURL,
+            progress: progress
+        )
+    }
+    
+    /// Returns every entry (files AND directories, recursively) under
+    /// `path` with a single API call. The tree API returns full
+    /// repo-relative paths even when querying a subpath (verified against
+    /// huggingface.co), so callers can map entries straight to disk.
+    func listAllFiles(repoId: String, path: String = "") async throws -> [HFModelFile] {
+        try await listFiles(repoId: repoId, path: path, recursive: true)
+    }
+    
+    /// Downloads the given file entries into `destinationURL`, preserving
+    /// the repo-relative layout. Progress is byte-based (not per-file), so
+    /// the bar reflects the real weight of large `.bin` weights vs small
+    /// config files. Any failed file aborts the download with an error
+    /// instead of silently leaving an incomplete model behind.
+    @discardableResult
+    func downloadFiles(
+        repoId: String,
+        files: [HFModelFile],
+        destinationURL: URL,
+        progress: @escaping (Double, String) -> Void
+    ) async throws -> Int64 {
+        let fileItems = files.filter { !$0.isDirectory }
+        guard !fileItems.isEmpty else { return 0 }
         
-        guard total > 0 else { return 0 }
-        
-        // 2) Download them one by one with real progress.
-        var downloaded = 0
-        var totalBytes: Int64 = 0
+        let totalBytes = fileItems.reduce(Int64(0)) { $0 + Int64($1.size ?? 0) }
+        var downloadedBytes: Int64 = 0
         
         for file in fileItems {
-            let relativePath = file.path
-            let destURL = destinationURL.appendingPathComponent(relativePath)
+            let destURL = destinationURL.appendingPathComponent(file.path)
             
             // 🔴 Fix #2.2: Use sanitized path for each file
             let safeRepo = sanitizePathComponent(repoId)
-            let safeFile = sanitizePathComponent(relativePath)
+            let safeFile = sanitizePathComponent(file.path)
             
             var components = URLComponents()
             components.scheme = "https"
             components.host = "huggingface.co"
-            components.path = "/\(safeRepo)/resolve/main/\(safeFile)"
+            components.percentEncodedPath = "/\(safeRepo)/resolve/main/\(safeFile)"
             
             guard let url = components.url else { continue }
             
@@ -317,46 +365,39 @@ final class HuggingFaceService {
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
                 try? FileManager.default.removeItem(at: tempURL)
-                continue
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                if code == 401 || code == 403 {
+                    throw HFError.authRequired
+                }
+                throw HFError.networkFailed(NSError(
+                    domain: "HF",
+                    code: code,
+                    userInfo: [NSLocalizedDescriptionKey: "Descarga fallida: \(file.path) (HTTP \(code)) — revisa tu conexión o token de Hugging Face."]
+                ))
             }
             
             try? FileManager.default.removeItem(at: destURL)
             try FileManager.default.moveItem(at: tempURL, to: destURL)
             
-            downloaded += 1
-            if let size = file.size {
-                totalBytes += Int64(size)
-            }
-            progress(Double(downloaded) / Double(total), "Descargando modelo...\n\(String(format: "%.0f%%", Double(downloaded) / Double(total) * 100))")
+            downloadedBytes += Int64(file.size ?? 0)
+            let fraction = totalBytes > 0 ? min(1, Double(downloadedBytes) / Double(totalBytes)) : 0
+            progress(fraction, "Descargando modelo… \(Int(fraction * 100))%")
         }
         
         // F7 fix: models are public data from HF, no need for file protection
         
-        // 🔴 Fix #2.2: Verify directory SHA-256 if provided
-        if let expectedSha256 = expectedSha256 {
-            let actualSha256 = try sha256OfFile(at: destinationURL)
-            guard actualSha256 == expectedSha256 else {
-                throw HFError.checksumMismatch(expectedSha256, actualSha256)
-            }
-        }
-        
-        return totalBytes
+        return downloadedBytes
     }
     
-    /// Recursively walks `directoryPath` (HF tree API returns only direct
-    /// children per call) and appends every entry to `into`.
+    /// Recursively walks `directoryPath` with a single recursive tree call
+    /// (the old version made one HTTP request per directory level).
     private func collectFiles(
         repoId: String,
         directoryPath: String,
         into: inout [HFModelFile]
     ) async throws {
-        let entries = try await listFiles(repoId: repoId, path: directoryPath)
-        for entry in entries {
-            into.append(entry)
-            if entry.isDirectory {
-                try await collectFiles(repoId: repoId, directoryPath: entry.path, into: &into)
-            }
-        }
+        let entries = try await listFiles(repoId: repoId, path: directoryPath, recursive: true)
+        into.append(contentsOf: entries)
     }
     
     // MARK: - Tokenizer download

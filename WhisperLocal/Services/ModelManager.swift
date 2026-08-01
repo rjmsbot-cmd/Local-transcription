@@ -117,22 +117,29 @@ final class ModelManager: ObservableObject {
         let localDir = modelsRoot.appendingPathComponent(safeName)
         
         do {
-            // Floor check only; the real total is recorded after the download.
-            _ = try DiskSpace.ensureSpace(for: 200 * 1024 * 1024)
-            
-            let downloadedBytes = try await HuggingFaceService.shared.downloadDirectory(
+            // Pre-flight: list the whole variant with a single recursive
+            // tree call. Fails fast ("repositorio no encontrado") when the
+            // variant is empty, and checks disk space against the REAL
+            // total size instead of an arbitrary floor.
+            let allFiles = try await HuggingFaceService.shared.listAllFiles(
                 repoId: repo.modelId,
-                directoryPath: variant,
-                expectedSha256: nil,
+                path: variant
+            )
+            let fileItems = allFiles.filter { !$0.isDirectory }
+            guard !fileItems.isEmpty else {
+                throw HFError.notFound
+            }
+            let totalBytes = fileItems.reduce(Int64(0)) { $0 + Int64($1.size ?? 0) }
+            _ = try DiskSpace.ensureSpace(for: max(totalBytes + 50 * 1024 * 1024, 200 * 1024 * 1024))
+            
+            let downloadedBytes = try await HuggingFaceService.shared.downloadFiles(
+                repoId: repo.modelId,
+                files: fileItems,
                 destinationURL: localDir,
                 progress: { fraction, phase in
                     progress?(fraction, phase)
                 }
             )
-            
-            guard downloadedBytes > 0 else {
-                throw HFError.notFound
-            }
             
             // WhisperKit loads the tokenizer from the model folder if
             // tokenizer.json exists there; otherwise it falls back to a

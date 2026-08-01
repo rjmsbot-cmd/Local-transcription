@@ -3,6 +3,20 @@ import SwiftData
 import UniformTypeIdentifiers
 import UIKit
 
+/// Single-sheet driver for TranscribeView (see ModelsView for why stacking
+/// two `.sheet` modifiers on one view breaks).
+enum TranscribeSheet: Identifiable {
+    case notesReview
+    case export(Transcription)
+    
+    var id: String {
+        switch self {
+        case .notesReview: return "notes-review"
+        case .export: return "export"
+        }
+    }
+}
+
 struct TranscribeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
@@ -11,7 +25,6 @@ struct TranscribeView: View {
     @ObservedObject var documentPickerService = DocumentPickerService.shared
     
     @State private var showingFilePicker = false
-    @State private var showingExport = false
     @State private var selectedAudioURL: URL?
     @State private var audioDuration: TimeInterval = 0
     @State private var audioFileName = ""
@@ -23,7 +36,10 @@ struct TranscribeView: View {
     @State private var showError = false
     @State private var showingNotesPicker = false
     @State private var importedNotesText: String = ""
-    @State private var showingImportedNotes = false
+    // Single-sheet driver: SwiftUI only honors ONE .sheet per view, so the
+    // old pair of .sheet(isPresented:) modifiers silently killed the notes
+    // review sheet (the first one attached).
+    @State private var activeSheet: TranscribeSheet?
     
     private let languages = [
         ("auto", "Auto-detect"),
@@ -77,18 +93,17 @@ struct TranscribeView: View {
             ) { result in
                 handleNotesImport(result)
             }
-            .sheet(isPresented: $showingImportedNotes) {
-                NotesImportReviewView(
-                    importedText: $importedNotesText,
-                    onSave: { title in
-                        saveImportedNotes(title: title)
-                    }
-                )
-            }
-            .sheet(isPresented: $showingExport) {
-                if let result = transcriptionResult {
-                    let t = makeTranscription(from: result)
-                    ExportSheet(transcription: t)
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .notesReview:
+                    NotesImportReviewView(
+                        importedText: $importedNotesText,
+                        onSave: { title in
+                            saveImportedNotes(title: title)
+                        }
+                    )
+                case .export(let transcription):
+                    ExportSheet(transcription: transcription)
                 }
             }
             .alert("Error", isPresented: $showError) {
@@ -348,7 +363,9 @@ struct TranscribeView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showingExport = true
+                    if let result = transcriptionResult {
+                        activeSheet = .export(makeTranscription(from: result))
+                    }
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
                         .font(.subheadline.weight(.medium))
@@ -491,7 +508,7 @@ struct TranscribeView: View {
                     } else {
                         importedNotesText = String(data: data, encoding: .isoLatin1) ?? ""
                     }
-                    showingImportedNotes = true
+                    activeSheet = .notesReview
                 } catch {
                     errorMessage = "No se pudo leer el archivo: \(error.localizedDescription)"
                     showError = true
@@ -516,6 +533,6 @@ struct TranscribeView: View {
         modelContext.insert(transcription)
         try? modelContext.save()
         importedNotesText = ""
-        showingImportedNotes = false
+        activeSheet = nil
     }
 }

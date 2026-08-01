@@ -2,16 +2,32 @@ import Foundation
 import SwiftUI
 import SwiftData
 
+/// Single-sheet driver for ModelsView.
+///
+/// SwiftUI only honors ONE `.sheet` modifier per view — stacking two
+/// `isPresented:` sheets on the same view silently kills the first one.
+/// That was why tapping a search result appeared to do nothing (the
+/// variant picker sheet never presented). A single `.sheet(item:)` driven
+/// by this enum makes both flows work.
+enum ModelSheet: Identifiable {
+    case variantPicker(HFRepoInfo)
+    case download(HFRepoInfo, String)
+    
+    var id: String {
+        switch self {
+        case .variantPicker(let repo): return "variants-\(repo.id)"
+        case .download(let repo, let variant): return "download-\(repo.id)-\(variant)"
+        }
+    }
+}
+
 struct ModelsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @State private var manager: ModelManager?
     @State private var searchQuery = ""
     @State private var coremlOnly = true // F5: filter toggle for CoreML-compatible models
-    @State private var selectedModel: HFRepoInfo?
-    @State private var selectedVariant = ""
-    @State private var showDownloadSheet = false
-    @State private var showVariantSelector = false
+    @State private var activeSheet: ModelSheet?
     @State private var diskSpace: String = ""
     
     var body: some View {
@@ -29,31 +45,30 @@ struct ModelsView: View {
                 Button { Task { refresh() } } label: { Image(systemName: "arrow.clockwise") }
             }
         }
-        .sheet(isPresented: $showVariantSelector) {
-            if let repo = selectedModel {
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .variantPicker(let repo):
                 VariantSelectorSheet(
                     repo: repo,
                     manager: manager!,
                     modelContext: modelContext,
                     onVariantSelected: { variantPath in
-                        selectedVariant = variantPath
-                        showVariantSelector = false
-                        showDownloadSheet = true
+                        activeSheet = .download(repo, variantPath)
                     },
                     onCancel: {
-                        showVariantSelector = false
+                        activeSheet = nil
                     }
                 )
-            }
-        }
-        .sheet(isPresented: $showDownloadSheet) {
-            if let repo = selectedModel {
+            case .download(let repo, let variant):
                 DownloadSheet(
                     repo: repo,
-                    variant: selectedVariant,
+                    variant: variant,
                     manager: manager!,
                     modelContext: modelContext,
-                    isPresented: $showDownloadSheet
+                    isPresented: Binding(
+                        get: { activeSheet != nil },
+                        set: { if !$0 { activeSheet = nil } }
+                    )
                 )
             }
         }
@@ -128,8 +143,7 @@ struct ModelsView: View {
                         Section("Resultados (\(filtered.count))") {
                             ForEach(filtered) { repo in
                                 SearchResultRow(repo: repo) {
-                                    selectedModel = repo
-                                    showVariantSelector = true
+                                    activeSheet = .variantPicker(repo)
                                 }
                             }
                         }
@@ -270,10 +284,10 @@ struct VariantSelectorSheet: View {
                     // Bottom action bar
                     VStack(spacing: 12) {
                         if let selected = selectedVariant {
-                            Text("Seleccionado: \(selected)")
+                            Text("Seleccionado: \(displayName(for: selected))")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Button("Descargar \(selected)") {
+                            Button("Descargar \(displayName(for: selected))") {
                                 onVariantSelected(selected)
                             }
                             .buttonStyle(.borderedProminent)
@@ -321,6 +335,10 @@ struct VariantSelectorSheet: View {
                 self.isLoading = false
             }
         }
+    }
+    
+    private func displayName(for path: String) -> String {
+        variants.first { $0.path == path }?.displayName ?? path
     }
 }
 
