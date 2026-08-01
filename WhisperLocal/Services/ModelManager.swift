@@ -71,12 +71,15 @@ final class ModelManager: ObservableObject {
         errorMessage = nil
         do {
             // Sort by downloads (most popular first) for ASR relevance
-            availableModels = try await HuggingFaceService.shared.searchModels(
+            let results = try await HuggingFaceService.shared.searchModels(
                 query: query,
                 coreMLOnly: coreMLOnly,
                 sort: "downloads",
                 direction: "-1"
             )
+            // Round 6: never offer repos WhisperKit cannot load (Qwen3-ASR,
+            // Parakeet, Nemotron...). They download fine but fail at load.
+            availableModels = results.filter { !$0.isIncompatibleArchitecture }
         } catch {
             errorMessage = error.localizedDescription
             availableModels = []
@@ -101,7 +104,10 @@ final class ModelManager: ObservableObject {
         guard !hasSearched else { return }
         do {
             let models = try await HuggingFaceService.shared.fetchRecommendedModels()
-            recommendedModels = models.filter { $0.isCoreML }
+            // Round 6: keep only WhisperKit-loadable repos (the Hub's
+            // top CoreML ASR downloads include Parakeet/Qwen/Nemotron,
+            // which WhisperKit 0.9.4 cannot load).
+            recommendedModels = models.filter { $0.isCoreML && !$0.isIncompatibleArchitecture }
         } catch {
             if !hasSearched {
                 errorMessage = error.localizedDescription
@@ -127,6 +133,12 @@ final class ModelManager: ObservableObject {
         context: ModelContext,
         progress: ((Double, String) -> Void)? = nil
     ) async throws -> DownloadedModel {
+        // Round 6: never download repos WhisperKit cannot load (Qwen3-ASR,
+        // Parakeet, Nemotron...). The variant picker already filters them,
+        // but this is defense in depth for any future code path.
+        guard !repo.isIncompatibleArchitecture else {
+            throw HFError.incompatibleModel
+        }
         let safeName = sanitizePathComponent(repo.modelId)
         let relativePath = "\(modelDirName)/\(safeName)/\(variant)"
         

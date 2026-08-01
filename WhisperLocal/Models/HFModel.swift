@@ -61,6 +61,15 @@ extension HFModel {
     var isCoreML: Bool {
         likelyHasCoreML
     }
+
+    /// Whether the repo belongs to a known non-Whisper CoreML architecture
+    /// that WhisperKit cannot load (Qwen3-ASR/FluidAudio, NVIDIA Parakeet,
+    /// Nemotron, SpeakerKit, ...). Name-based fast check — the definitive
+    /// gate is the artifact-level check in `HuggingFaceService.listModelVariants`.
+    var isIncompatibleArchitecture: Bool {
+        let lower = modelId.lowercased()
+        return HuggingFaceService.incompatibleArchitectureKeywords.contains { lower.contains($0) }
+    }
 }
 
 // MARK: - HF File Tree Types
@@ -75,18 +84,12 @@ struct HFModelFile: Identifiable, Codable, Hashable {
     /// variant list must NEVER fail on a missing/odd field.
     let type: String?
     let lfs: LFSPayload?
-    /// Set by `HuggingFaceService.listModelVariants` for Qwen ASR-style
-    /// variants: multi-component models (encoder + decoder + embedding)
-    /// that must be downloaded together. Optional so synthesized Codable
-    /// treats a missing key as nil (the tree API never sends it).
-    var isQwenMultiComponent: Bool?
-    
-    init(path: String, size: Int? = nil, type: String? = nil, lfs: LFSPayload? = nil, isQwenMultiComponent: Bool? = nil) {
+
+    init(path: String, size: Int? = nil, type: String? = nil, lfs: LFSPayload? = nil) {
         self.path = path
         self.size = size
         self.type = type
         self.lfs = lfs
-        self.isQwenMultiComponent = isQwenMultiComponent
     }
     
     var isDirectory: Bool { type == "directory" }
@@ -110,18 +113,9 @@ struct HFModelFile: Identifiable, Codable, Hashable {
         return Self.prettyVariantName(raw)
     }
     
-    /// Name shown in the variant picker / download button. Qwen ASR
-    /// multi-component variants get clearer labels instead of the raw
-    /// quant dir name ("int8" → "Cuantización: INT8").
+    /// Name shown in the variant picker / download button.
     var variantDisplayName: String {
-        if isQwenMultiComponent == true {
-            if path.isEmpty {
-                return "Modelo completo (todos los componentes)"
-            }
-            let cleaned = path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).uppercased()
-            return "Cuantización: \(cleaned)"
-        }
-        return displayName
+        displayName
     }
     
     /// Short family label (OpenAI Whisper / Distil-Whisper / …).

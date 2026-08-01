@@ -10,6 +10,7 @@ enum HFError: LocalizedError {
     case rateLimited
     case checksumMismatch(String, String)
     case authRequired
+    case incompatibleModel
     
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum HFError: LocalizedError {
             return "Integridad del archivo comprometida (SHA-256: esperado \(expected.prefix(12))… vs obtenido \(actual.prefix(12))…)"
         case .authRequired:
             return "Este repositorio requiere autenticación. Añade un token de Hugging Face en Ajustes."
+        case .incompatibleModel:
+            return "Este modelo usa una arquitectura que WhisperKit no puede cargar (Qwen3-ASR, Parakeet, Nemotron…). Descarga un modelo Whisper (AudioEncoder/TextDecoder/MelSpectrogram)."
         }
     }
     
@@ -82,11 +85,20 @@ final class HuggingFaceService {
     // 🔴 Fix #3: Cache for compatibility checks (reduces N+1 HTTP calls)
     private var compatibilityCache: [String: Bool] = [:]
     
-    // Regex for Qwen quantization subdirs: f32/, int8/, int4/, fp16/, etc.
-    private static let qwenQuantPattern = try! NSRegularExpression(
-        pattern: "^(f32|int8|int4|fp16|fp32|bf16|q[48])/?$",
-        options: [.caseInsensitive]
-    )
+    // Exact artifact names WhisperKit 0.9.4's loadModels() requires
+    // (WhisperKit.swift:332-354): if any is missing it throws
+    // WhisperError.modelsUnavailable. TextDecoderContextPrefill is optional.
+    static let whisperKitComponents = ["MelSpectrogram", "AudioEncoder", "TextDecoder"]
+
+    // Known non-Whisper CoreML architectures (Qwen3-ASR/FluidAudio, NVIDIA
+    // Parakeet, Nemotron, SpeakerKit, ...). WhisperKit 0.9.4 only loads the
+    // Whisper family, so repos matching these keywords are excluded even
+    // when their filenames look compatible (e.g. parakeetkit-pro ships
+    // AudioEncoder/TextDecoder/MelSpectrogram but would crash at inference).
+    static let incompatibleArchitectureKeywords = [
+        "parakeet", "nemotron", "qwen", "speaker", "diar",
+        "cohere", "omni", "breeze", "sortformer", "canary"
+    ]
     
     // MARK: - Search
     
@@ -197,10 +209,26 @@ final class HuggingFaceService {
     }
     
     private func checkCompatibility(repoId: String, path: String = "") async throws -> Bool {
-        let files = try await listFiles(repoId: repoId, path: path)
-        return files.contains { file in
-            let name = file.path.lowercased()
-            return name.contains("mlmodelc") || name.contains("mlpackage")
+        // Fast fail on known non-Whisper architectures: they may ship
+        // WhisperKit-looking filenames but are not loadable (Qwen3-ASR,
+        // Parakeet, Nemotron...).
+        let lowerRepo = repoId.lowercased()
+        if Self.incompatibleArchitectureKeywords.contains(where: { lowerRepo.contains($0) }) {
+            return false
+        }
+        // Real check: the recursive tree must contain the exact artifacts
+        // WhisperKit's loadModels() requires (MelSpectrogram, AudioEncoder
+        // and TextDecoder as .mlmodelc/.mlpackage bundles). The old code
+        // only listed the top level and matched ANY mlmodelc/mlpackage
+        // name, so it flagged Qwen repos as compatible.
+        let files = try await listFiles(repoId: repoId, path: path, recursive: true)
+        let prefix = path.isEmpty ? "" : path + "/"
+        return Self.whisperKitComponents.allSatisfy { component in
+            files.contains { file in
+                file.path.hasPrefix(prefix) &&
+                file.path.contains(component) &&
+                file.isCoreMLBundleName
+            }
         }
     }
     
@@ -217,77 +245,60 @@ final class HuggingFaceService {
     /// client-side, since the tree API returns every entry with full
     /// repo-relative paths.
     ///
-    /// Handles two repo layouts:
-    /// 1. **WhisperKit style** (argmaxinc/*): each variant is a self-contained
-    ///    directory with AudioEncoder/TextDecoder/MelSpectrogram .mlmodelc + tokenizer
-    /// 2. **Qwen ASR style** (aufklarer/*, FluidInference/*): multi-component
-    ///    at root (encoder.mlmodelc, decoder_part1/2.mlmodelc, embedding.mlmodelc,
-    ///    encoder_fp16.mlpackage, etc.), optionally under quantization subdirs (f32/, int8/)
-    ///    — these are grouped into a single “variant” per quantization.
+    /// WhisperKit 0.9.4 can ONLY load Whisper-family models. A variant is
+    /// only offered when its subtree contains the exact artifacts
+    /// `loadModels()` requires — `MelSpectrogram`, `AudioEncoder` and
+    /// `TextDecoder` as .mlmodelc/.mlpackage bundles. Repos with a
+    /// different architecture (Qwen3-ASR, Parakeet, Nemotron, ...) are
+    /// excluded by keyword even when their filenames look similar, because
+    /// loading them fails (or crashes at inference) no matter how they are
+    /// downloaded.
     func listModelVariants(repoId: String) async throws -> [HFModelFile] {
+        // Architecture denylist: known non-Whisper families that WhisperKit
+        // cannot load under any circumstances.
+        let lowerRepo = repoId.lowercased()
+        guard !Self.incompatibleArchitectureKeywords.contains(where: { lowerRepo.contains($0) }) else {
+            return []
+        }
+
         let all = try await listFiles(repoId: repoId, recursive: true)
-        
+
         // Only top-level entries (no "/" in the path) can be variants.
         let topLevel = all.filter { !$0.path.contains("/") }
-        
+
+        // True when the subtree under `prefix` contains all three artifacts.
+        func hasWhisperKitComponents(under prefix: String) -> Bool {
+            Self.whisperKitComponents.allSatisfy { component in
+                all.contains { entry in
+                    entry.path.hasPrefix(prefix) &&
+                    entry.path.contains(component) &&
+                    entry.isCoreMLBundleName
+                }
+            }
+        }
+
         // Edge case: repos where the CoreML bundle lives directly at the
         // repo root (AudioEncoder/TextDecoder/MelSpectrogram .mlmodelc
         // folders, no per-variant subdirectory). Expose them as a single
-        // “root bundle” variant (empty path) instead of three bogus
-        // encoder/decoder entries. Must be checked on top-level entries
-        // only — with a recursive listing, nested paths under any variant
-        // also contain “AudioEncoder” and “mlmodelc”.
-        let rootHasEncoder = topLevel.contains { $0.path.contains("AudioEncoder") && $0.isCoreMLBundleName }
-        let rootHasDecoder = topLevel.contains { $0.path.contains("TextDecoder") && $0.isCoreMLBundleName }
-        if rootHasEncoder && rootHasDecoder {
-            return [HFModelFile(
-                path: "",
-                size: nil,
-                type: "directory",
-                lfs: nil
-            )]
+        // "root bundle" variant (empty path). Must be checked on top-level
+        // entries only — with a recursive listing, nested paths under any
+        // variant also contain "AudioEncoder" and "mlmodelc".
+        let rootHasAll = Self.whisperKitComponents.allSatisfy { component in
+            topLevel.contains { $0.path.contains(component) && $0.isCoreMLBundleName }
         }
-        
-        // Detect Qwen ASR style: top-level has encoder/decoder/embedding
-        // components (or .mlpackage variants) but NO AudioEncoder/TextDecoder.
-        // These are multi-component models that must be downloaded together.
-        let hasQwenEncoder = topLevel.contains { $0.path.lowercased().contains("encoder") && $0.isCoreMLBundleName }
-        let hasQwenDecoder = topLevel.contains { $0.path.lowercased().contains("decoder") && $0.isCoreMLBundleName }
-        let hasQwenEmbedding = topLevel.contains { $0.path.lowercased().contains("embedding") && $0.isCoreMLBundleName }
-        let isQwenStyle = (hasQwenEncoder || hasQwenDecoder || hasQwenEmbedding) && !(rootHasEncoder && rootHasDecoder)
-        
-        if isQwenStyle {
-            // Group by quantization subdir if present (f32/, int8/, int4/)
-            // else single root variant.
-            let quantDirs = topLevel.filter { $0.isDirectoryLike && $0.path.lowercased().matches(Self.qwenQuantPattern) }
-            if !quantDirs.isEmpty {
-                return quantDirs.map { dir in
-                    HFModelFile(
-                        path: dir.path,
-                        size: nil,
-                        type: "directory",
-                        lfs: nil,
-                        isQwenMultiComponent: true
-                    )
-                }.sorted { $0.variantSortRank < $1.variantSortRank }
-            } else {
-                // Single root variant containing all components
-                return [HFModelFile(
-                    path: "",
-                    size: nil,
-                    type: "directory",
-                    lfs: nil,
-                    isQwenMultiComponent: true
-                )]
-            }
+        if rootHasAll {
+            return [HFModelFile(path: "", size: nil, type: "directory", lfs: nil)]
         }
-        
-        // Standard WhisperKit style: each top-level dir that contains
-        // a CoreML bundle somewhere inside is a variant.
+
+        // Standard WhisperKit style: each top-level dir whose subtree
+        // contains ALL three artifacts is a variant. Repos that only match
+        // partially (e.g. Qwen's encoder/decoder_part1/decoder_part2/
+        // embedding) yield no variants instead of a broken download.
         let variants = topLevel.filter { dir in
             guard dir.isDirectoryLike else { return false }
-            let prefix = dir.path + "/"
-            return all.contains { $0.path.hasPrefix(prefix) && $0.isCoreMLBundleName }
+            let dirLower = dir.path.lowercased()
+            guard !Self.incompatibleArchitectureKeywords.contains(where: { dirLower.contains($0) }) else { return false }
+            return hasWhisperKitComponents(under: dir.path + "/")
         }
         return variants.sorted { $0.variantSortRank < $1.variantSortRank }
     }
@@ -609,15 +620,5 @@ final class HuggingFaceService {
             .filter { $0 != ".." && !$0.isEmpty }
             .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "" }
             .joined(separator: "/")
-    }
-}
-
-// MARK: - String extensions for regex matching
-
-extension String {
-    /// Returns true if the string matches the given NSRegularExpression.
-    func matches(_ regex: NSRegularExpression) -> Bool {
-        let range = NSRange(location: 0, length: self.utf16.count)
-        return regex.firstMatch(in: self, options: [], range: range) != nil
     }
 }

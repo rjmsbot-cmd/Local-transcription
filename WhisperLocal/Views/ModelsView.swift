@@ -226,12 +226,25 @@ struct ModelRow: View {
             }
             Spacer()
             if model.status == .ready {
-                Button {
-                    Task {
-                        guard let path = model.fullPath else { return }
-                        try await appState.transcriptionEngine.loadModel(at: path.path)
-                    }
-                } label: { Image(systemName: "play.fill").foregroundColor(.green) }
+                if model.isWhisperKitCompatibleFolder {
+                    Button {
+                        Task {
+                            guard let path = model.fullPath else { return }
+                            try await appState.transcriptionEngine.loadModel(at: path.path)
+                        }
+                    } label: { Image(systemName: "play.fill").foregroundColor(.green) }
+                } else {
+                    // Leftover from before the Round 6 filter (e.g. a Qwen
+                    // model): WhisperKit can never load this folder, so
+                    // offer delete + explanation instead of a broken play.
+                    Text("No compatible con WhisperKit")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.red.opacity(0.12))
+                        .cornerRadius(6)
+                }
             }
             Button { showDelete = true } label: { Image(systemName: "trash").foregroundColor(.red) }
         }
@@ -303,9 +316,9 @@ struct VariantSelectorSheet: View {
                     ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(e))
                 } else if variants.isEmpty {
                     ContentUnavailableView(
-                        "Sin variantes CoreML",
+                        "Sin modelos compatibles",
                         systemImage: "brain",
-                        description: Text("Este repositorio no tiene modelos .mlpackage/.mlmodelc compatibles con iOS.")
+                        description: Text("Este repositorio no contiene un modelo que WhisperKit pueda cargar.\n\nSolo son compatibles los modelos Whisper (se esperan AudioEncoder, TextDecoder y MelSpectrogram). Los modelos Qwen3-ASR, Parakeet y Nemotron usan otra arquitectura y no funcionan en esta app.")
                     )
                 } else {
                     List {
@@ -437,15 +450,6 @@ struct VariantRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.orange.opacity(0.15))
-                    .clipShape(Capsule())
-            }
-            // Qwen multi-component indicator
-            if variant.isQwenMultiComponent == true {
-                Text("Multi-componente")
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.purple.opacity(0.15))
                     .clipShape(Capsule())
             }
         }

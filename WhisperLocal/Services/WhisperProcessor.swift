@@ -82,9 +82,15 @@ actor WhisperProcessor {
         guard let contents = try? FileManager.default.contentsOfDirectory(atPath: path) else {
             return false
         }
-        let hasEncoder = contents.contains { $0.contains("AudioEncoder") && $0.hasSuffix(".mlmodelc") }
-        let hasDecoder = contents.contains { $0.contains("TextDecoder") && $0.hasSuffix(".mlmodelc") }
-        return hasEncoder && hasDecoder
+        // Mirrors WhisperKit 0.9.4's loadModels(): all three artifacts are
+        // required (MelSpectrogram, AudioEncoder, TextDecoder), each as a
+        // .mlmodelc or .mlpackage bundle. Qwen/Parakeet folders fail this
+        // check even though they contain CoreML files.
+        return ["MelSpectrogram", "AudioEncoder", "TextDecoder"].allSatisfy { name in
+            contents.contains {
+                $0.hasPrefix(name) && ($0.hasSuffix(".mlmodelc") || $0.hasSuffix(".mlpackage"))
+            }
+        }
     }
 
     // MARK: - Transcription
