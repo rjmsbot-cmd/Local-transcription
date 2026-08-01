@@ -9,6 +9,7 @@ enum HFError: LocalizedError {
     case notFound
     case rateLimited
     case checksumMismatch(String, String)
+    case authRequired
     
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,8 @@ enum HFError: LocalizedError {
             return "Demasiadas peticiones. Espera un momento e inténtalo de nuevo."
         case .checksumMismatch(let expected, let actual):
             return "Integridad del archivo comprometida (SHA-256: esperado \(expected.prefix(12))… vs obtenido \(actual.prefix(12))…)"
+        case .authRequired:
+            return "Este repositorio requiere autenticación. Añade un token de Hugging Face en Ajustes."
         }
     }
 }
@@ -78,20 +81,22 @@ final class HuggingFaceService {
     // MARK: - Compatibility check (with caching)
     
     func hasCompatibleFiles(repoId: String, forceRefresh: Bool = false) async throws -> Bool {
+        try await hasCompatibleFiles(repoId: repoId, path: "", forceRefresh: forceRefresh)
+    }
+    
+    func hasCompatibleFiles(repoId: String, path: String, forceRefresh: Bool = false) async throws -> Bool {
         // 🔴 Fix #3: Use cache to reduce N+1 HTTP calls
-        guard !forceRefresh else {
-            return try await checkCompatibility(repoId: repoId)
-        }
-        if let cached = compatibilityCache[repoId] {
+        let cacheKey = path.isEmpty ? repoId : "\(repoId)#\(path)"
+        if !forceRefresh, let cached = compatibilityCache[cacheKey] {
             return cached
         }
-        let result = try await checkCompatibility(repoId: repoId)
-        compatibilityCache[repoId] = result
+        let result = try await checkCompatibility(repoId: repoId, path: path)
+        compatibilityCache[cacheKey] = result
         return result
     }
     
-    private func checkCompatibility(repoId: String) async throws -> Bool {
-        let files = try await listFiles(repoId: repoId)
+    private func checkCompatibility(repoId: String, path: String = "") async throws -> Bool {
+        let files = try await listFiles(repoId: repoId, path: path)
         return files.contains { file in
             let name = file.path.lowercased()
             return name.contains("mlmodelc") || name.contains("mlpackage")
@@ -99,25 +104,48 @@ final class HuggingFaceService {
     }
     
     // MARK: - Model variants
-    
+
+    /// Returns directory-like entries that are (or contain) CoreML model
+    /// bundles. The old implementation only matched names containing
+    /// ".mlpackage", which silently dropped the main WhisperKit repo
+    /// (`argmaxinc/whisperkit-coreml_*`, whose folders are named like
+    /// `openai_whisper-base` and contain `.mlmodelc` subdirectories).
     func listModelVariants(repoId: String) async throws -> [HFModelFile] {
         let files = try await listFiles(repoId: repoId)
-        return files.filter { file in
-            // 🔴 Fix #1.2: Only show CoreML-compatible files (GGUF filtering)
-            // Include directories (for .mlpackage/.mlmodelc) and CoreML files
-            if file.isDirectory {
-                let name = file.path.lowercased()
-                return name.contains("mlmodelc") || name.contains("mlpackage")
-            }
-            let name = file.path.lowercased()
-            return name.contains("mlmodelc") ||
-                   name.contains("mlpackage") ||
-                   name.hasSuffix(".mlmodel")
+        var candidates = files.filter { $0.isDirectoryLike && $0.isCoreMLBundleName }
+        
+        // Edge case: repos where the CoreML bundle lives directly at the
+        // repo root (AudioEncoder/TextDecoder/MelSpectrogram .mlmodelc
+        // folders, no per-variant subdirectory). Expose them as a single
+        // "root bundle" variant (empty path) instead of three bogus
+        // encoder/decoder entries.
+        let hasEncoder = files.contains { $0.path.contains("AudioEncoder") && $0.isCoreMLBundleName }
+        let hasDecoder = files.contains { $0.path.contains("TextDecoder") && $0.isCoreMLBundleName }
+        let rootLooksLikeBundle = hasEncoder && hasDecoder
+        
+        if rootLooksLikeBundle {
+            return [HFModelFile(
+                id: "\(repoId)#root",
+                path: "",
+                size: nil,
+                type: "directory",
+                lfs: nil
+            )]
         }
+        
+        // Also include directory-like entries whose *contents* contain
+        // CoreML bundles (checked one level deep, cached).
+        let otherDirs = files.filter { $0.isDirectoryLike && !$0.isCoreMLBundleName }
+        for dir in otherDirs {
+            if try await hasCompatibleFiles(repoId: repoId, path: dir.path) {
+                candidates.append(dir)
+            }
+        }
+        return candidates
     }
-    
+
     // MARK: - File listing
-    
+
     func listFiles(repoId: String, path: String = "") async throws -> [HFModelFile] {
         // F2 fix: use the correct HF tree API endpoint
         let safeRepo = sanitizePathComponent(repoId)
@@ -126,7 +154,11 @@ final class HuggingFaceService {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "huggingface.co"
-        components.path = "/api/models/\(safeRepo)/tree/main/\(safePath)"
+        if safePath.isEmpty {
+            components.path = "/api/models/\(safeRepo)/tree/main"
+        } else {
+            components.path = "/api/models/\(safeRepo)/tree/main/\(safePath)"
+        }
         
         guard let url = components.url else {
             throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"]))
@@ -140,6 +172,12 @@ final class HuggingFaceService {
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "Respuesta inválida"]))
+        }
+        
+        // Gated/private repos return 401 with an error body — surface a
+        // clear message instead of a confusing decoding failure.
+        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+            throw HFError.authRequired
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
@@ -192,11 +230,15 @@ final class HuggingFaceService {
         if !Self.authToken.isEmpty {
             request.setValue("Bearer \(Self.authToken)", forHTTPHeaderField: "Authorization")
         }
-        let (tempURL, response) = try await URLSession.shared.download(from: url)
+        let (tempURL, response) = try await URLSession.shared.download(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             try? FileManager.default.removeItem(at: tempURL)
+            if let httpResponse = response as? HTTPURLResponse,
+               httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                throw HFError.authRequired
+            }
             throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "Descarga fallida"]))
         }
         
@@ -219,20 +261,32 @@ final class HuggingFaceService {
     
     // MARK: - Directory download (for .mlpackage / .mlmodelc)
     
+    /// Recursively downloads every file under `directoryPath` into
+    /// `destinationURL`, preserving the repo-relative layout. Returns the
+    /// total number of bytes downloaded.
+    ///
+    /// The old implementation only fetched the direct children of the
+    /// directory (and only the files, not nested folders), so `.mlpackage`
+    /// / `.mlmodelc` bundles came down incomplete and failed to load.
+    @discardableResult
     func downloadDirectory(
         repoId: String,
         directoryPath: String,
         expectedSha256: String?,
         destinationURL: URL,
-        progress: @escaping (Double) -> Void
-    ) async throws {
-        let files = try await listFiles(repoId: repoId, path: directoryPath)
-        let fileItems = files.filter { !$0.isDirectory }
+        progress: @escaping (Double, String) -> Void
+    ) async throws -> Int64 {
+        // 1) Walk the tree and collect every file (recursively).
+        var allFiles: [HFModelFile] = []
+        try await collectFiles(repoId: repoId, directoryPath: directoryPath, into: &allFiles)
+        let fileItems = allFiles.filter { !$0.isDirectory }
         let total = fileItems.count
         
-        guard total > 0 else { return }
+        guard total > 0 else { return 0 }
         
+        // 2) Download them one by one with real progress.
         var downloaded = 0
+        var totalBytes: Int64 = 0
         
         for file in fileItems {
             let relativePath = file.path
@@ -257,6 +311,7 @@ final class HuggingFaceService {
             if !Self.authToken.isEmpty {
                 request.setValue("Bearer \(Self.authToken)", forHTTPHeaderField: "Authorization")
             }
+            
             let (tempURL, response) = try await URLSession.shared.download(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse,
@@ -269,7 +324,10 @@ final class HuggingFaceService {
             try FileManager.default.moveItem(at: tempURL, to: destURL)
             
             downloaded += 1
-            progress(Double(downloaded) / Double(total))
+            if let size = file.size {
+                totalBytes += Int64(size)
+            }
+            progress(Double(downloaded) / Double(total), "Descargando modelo...\n\(String(format: "%.0f%%", Double(downloaded) / Double(total) * 100))")
         }
         
         // F7 fix: models are public data from HF, no need for file protection
@@ -280,6 +338,76 @@ final class HuggingFaceService {
             guard actualSha256 == expectedSha256 else {
                 throw HFError.checksumMismatch(expectedSha256, actualSha256)
             }
+        }
+        
+        return totalBytes
+    }
+    
+    /// Recursively walks `directoryPath` (HF tree API returns only direct
+    /// children per call) and appends every entry to `into`.
+    private func collectFiles(
+        repoId: String,
+        directoryPath: String,
+        into: inout [HFModelFile]
+    ) async throws {
+        let entries = try await listFiles(repoId: repoId, path: directoryPath)
+        for entry in entries {
+            into.append(entry)
+            if entry.isDirectory {
+                try await collectFiles(repoId: repoId, directoryPath: entry.path, into: &into)
+            }
+        }
+    }
+    
+    // MARK: - Tokenizer download
+    
+    /// Downloads the tokenizer files (tokenizer.json, vocab.json, merges.txt,
+    /// …) for a Whisper model size from the matching `openai/whisper-*` repo
+    /// into `destinationURL`.
+    ///
+    /// WhisperKit loads the tokenizer from the model folder if it finds
+    /// `tokenizer.json` there; otherwise it tries a network download, which
+    /// is not acceptable for an offline-first app. This makes model loading
+    /// fully local. Missing individual files (some repos omit them) are
+    /// skipped — only `tokenizer.json` is strictly required.
+    func downloadTokenizerFiles(
+        modelSize: String,
+        destinationURL: URL,
+        progress: @escaping (Double, String) -> Void
+    ) async throws {
+        let tokenizerRepo = "openai/whisper-\(modelSize)"
+        let files = [
+            "tokenizer.json",
+            "vocab.json",
+            "merges.txt",
+            "added_tokens.json",
+            "special_tokens_map.json",
+            "tokenizer_config.json"
+        ]
+        try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+        
+        var downloaded = 0
+        for file in files {
+            let dest = destinationURL.appendingPathComponent(file)
+            if FileManager.default.fileExists(atPath: dest.path) {
+                downloaded += 1
+                continue
+            }
+            do {
+                try await downloadFileWithProgress(
+                    repoId: tokenizerRepo,
+                    fileName: file,
+                    expectedSha256: nil,
+                    destinationURL: dest,
+                    progress: { _ in }
+                )
+                downloaded += 1
+            } catch {
+                // Optional file missing on the repo — skip it.
+                try? FileManager.default.removeItem(at: dest)
+                print("[HuggingFaceService] Tokenizer file skipped: \(file) (\(error.localizedDescription))")
+            }
+            progress(Double(downloaded) / Double(files.count), "Descargando tokenizer…")
         }
     }
     

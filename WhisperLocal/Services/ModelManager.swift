@@ -74,26 +74,36 @@ final class ModelManager: ObservableObject {
     
     // MARK: - Download
     
+    /// Downloads a CoreML model bundle.
+    ///
+    /// - Parameters:
+    ///   - repo: the Hugging Face repo.
+    ///   - variant: the **actual directory name** inside the repo that
+    ///     contains the model bundle (e.g. `openai_whisper-base` or
+    ///     `whisper-base.mlpackage`). The old code invented
+    ///     `<repoId>.mlpackage`, which does not exist in most repos, so the
+    ///     download always 404'd.
     func downloadModel(
         _ repo: HFRepoInfo,
         variant: String,
         context: ModelContext,
         progress: ((Double, String) -> Void)? = nil
     ) async throws -> DownloadedModel {
-        // Check disk space first
-        let estimatedSize: Int64 = 2_000_000_000 // ~2GB estimate for Core ML Whisper
-        _ = try DiskSpace.ensureSpace(for: estimatedSize)
-        
         let safeName = sanitizePathComponent(repo.modelId)
         let relativePath = "\(modelDirName)/\(safeName)/\(variant)"
+        
+        // The search API no longer returns `author`; derive it from the
+        // model id (e.g. "argmaxinc/whisperkit-coreml_01-30-24" →
+        // "argmaxinc") so display names stay readable.
+        let author = repo.author ?? repo.modelId.split(separator: "/").first.map(String.init) ?? ""
         
         // Create DownloadedModel entry
         let model = DownloadedModel(
             name: repo.modelId,
-            author: repo.author ?? "",
+            author: author,
             variant: variant,
             format: "coreml",
-            sizeBytes: estimatedSize,
+            sizeBytes: 0,
             relativePath: relativePath,
             status: .downloading
         )
@@ -101,22 +111,50 @@ final class ModelManager: ObservableObject {
         try context.save()
         downloadedModels.append(model)
         
-        let localDir = documentsDirectory().appendingPathComponent(relativePath)
+        // The destination is the models root; files land under
+        // <root>/<variant>/... preserving the repo-relative layout.
+        let modelsRoot = documentsDirectory().appendingPathComponent(modelDirName)
+        let localDir = modelsRoot.appendingPathComponent(safeName)
         
         do {
-            // Download the .mlpackage directory tree
-            let mlPackageDir = "\(variant).mlpackage"
-            _ = try await HuggingFaceService.shared.downloadDirectory(
+            // Floor check only; the real total is recorded after the download.
+            _ = try DiskSpace.ensureSpace(for: 200 * 1024 * 1024)
+            
+            let downloadedBytes = try await HuggingFaceService.shared.downloadDirectory(
                 repoId: repo.modelId,
-                directoryPath: mlPackageDir,
+                directoryPath: variant,
                 expectedSha256: nil,
                 destinationURL: localDir,
-                progress: { fraction in
-                    progress?(fraction, "Descargando modelo...\n\(String(format: "%.0f%%", fraction * 100))")
+                progress: { fraction, phase in
+                    progress?(fraction, phase)
                 }
             )
             
-            // Update status
+            guard downloadedBytes > 0 else {
+                throw HFError.notFound
+            }
+            
+            // WhisperKit loads the tokenizer from the model folder if
+            // tokenizer.json exists there; otherwise it falls back to a
+            // network download, which breaks offline loading. The CoreML
+            // bundles on the Hub (argmaxinc etc.) do NOT ship a tokenizer,
+            // so fetch it from the matching openai/whisper-* repo.
+            let modelFolder = localDir.appendingPathComponent(variant)
+            // For root-bundle repos the variant is empty; fall back to the
+            // repo id to detect the model size.
+            let sizeSource = variant.isEmpty ? repo.modelId : variant
+            if let size = Self.tokenizerSize(from: sizeSource) {
+                try? await HuggingFaceService.shared.downloadTokenizerFiles(
+                    modelSize: size,
+                    destinationURL: modelFolder,
+                    progress: { fraction, phase in
+                        progress?(fraction, phase)
+                    }
+                )
+            }
+            
+            // Update status with the real downloaded size
+            model.sizeBytes = downloadedBytes
             model.status = .ready
             try context.save()
         } catch {
@@ -139,5 +177,21 @@ final class ModelManager: ObservableObject {
         input.replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "\\", with: "_")
             .replacingOccurrences(of: "..", with: "_")
+    }
+    
+    /// Maps a variant folder name (e.g. `openai_whisper-base`,
+    /// `whisper-large-v3-turbo`) to the matching `openai/whisper-*` repo
+    /// suffix used for the tokenizer files.
+    static func tokenizerSize(from variant: String) -> String? {
+        let lower = variant.lowercased()
+        if lower.contains("large-v3-turbo") { return "large-v3-turbo" }
+        if lower.contains("large-v3") { return "large-v3" }
+        if lower.contains("large-v2") { return "large-v2" }
+        if lower.contains("large") { return "large" }
+        if lower.contains("medium") { return "medium" }
+        if lower.contains("small") { return "small" }
+        if lower.contains("base") { return "base" }
+        if lower.contains("tiny") { return "tiny" }
+        return nil
     }
 }

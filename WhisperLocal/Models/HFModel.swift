@@ -48,7 +48,8 @@ struct HFModel: Identifiable, Codable, Hashable {
 
     
     enum CodingKeys: String, CodingKey {
-        case id, modelId, author, pipelineTag, tags, downloads, likes, lastModified
+        case id, modelId, author, tags, downloads, likes, lastModified
+        case pipelineTag = "pipeline_tag"
     }
 }
 
@@ -68,11 +69,26 @@ struct HFModelFile: Identifiable, Codable, Hashable {
     let id: String
     let path: String
     let size: Int?
-    let type: String // "file" or "directory"
+    let type: String // "file", "directory" or "symlink"
     let lfs: LFSPayload?
     
     var isDirectory: Bool { type == "directory" }
-    var displayName: String { path.split(separator: "/").last?.description ?? path }
+    /// Some CoreML repos expose .mlpackage/.mlmodelc entries as symlinks
+    /// ("symlink" type in the HF tree API). Treat them as directories when
+    /// listing variants so they are not silently dropped.
+    var isSymlink: Bool { type == "symlink" }
+    /// True for directory-like entries (real dirs or symlinks).
+    var isDirectoryLike: Bool { isDirectory || isSymlink }
+    var displayName: String {
+        if path.isEmpty { return "Raíz del repositorio" }
+        return path.split(separator: "/").last?.description ?? path
+    }
+    
+    /// A directory-like entry that looks like a CoreML model bundle.
+    var isCoreMLBundleName: Bool {
+        let name = path.lowercased()
+        return name.contains("mlmodelc") || name.contains("mlpackage")
+    }
     
     struct LFSPayload: Codable, Hashable {
         let sha256: String

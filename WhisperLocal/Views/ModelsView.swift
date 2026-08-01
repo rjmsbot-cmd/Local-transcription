@@ -9,6 +9,7 @@ struct ModelsView: View {
     @State private var searchQuery = ""
     @State private var coremlOnly = true // F5: filter toggle for CoreML-compatible models
     @State private var selectedModel: HFRepoInfo?
+    @State private var selectedVariant = ""
     @State private var showDownloadSheet = false
     @State private var showVariantSelector = false
     @State private var diskSpace: String = ""
@@ -34,7 +35,8 @@ struct ModelsView: View {
                     repo: repo,
                     manager: manager!,
                     modelContext: modelContext,
-                    onVariantSelected: { variant in
+                    onVariantSelected: { variantPath in
+                        selectedVariant = variantPath
                         showVariantSelector = false
                         showDownloadSheet = true
                     },
@@ -46,7 +48,13 @@ struct ModelsView: View {
         }
         .sheet(isPresented: $showDownloadSheet) {
             if let repo = selectedModel {
-                DownloadSheet(repo: repo, manager: manager!, modelContext: modelContext, isPresented: $showDownloadSheet)
+                DownloadSheet(
+                    repo: repo,
+                    variant: selectedVariant,
+                    manager: manager!,
+                    modelContext: modelContext,
+                    isPresented: $showDownloadSheet
+                )
             }
         }
     }
@@ -252,8 +260,8 @@ struct VariantSelectorSheet: View {
                         ForEach(variants) { variant in
                             VariantRow(
                                 variant: variant,
-                                isSelected: selectedVariant == variant.displayName,
-                                onTap: { selectedVariant = variant.displayName }
+                                isSelected: selectedVariant == variant.path,
+                                onTap: { selectedVariant = variant.path }
                             )
                         }
                     }
@@ -299,11 +307,12 @@ struct VariantSelectorSheet: View {
     
     private func loadVariants() async {
         do {
+            // The service now returns any directory that is (or contains)
+            // a CoreML bundle, so `argmaxinc/whisperkit-coreml_*` repos
+            // (folders named like `openai_whisper-base`) show up too.
             let files = try await HuggingFaceService.shared.listModelVariants(repoId: repo.modelId)
-            // Filter to only .mlpackage directories (the actual model variants)
-            let mlpackageVariants = files.filter { $0.isDirectory && $0.path.lowercased().contains("mlpackage") }
             await MainActor.run {
-                self.variants = mlpackageVariants.isEmpty ? files : mlpackageVariants
+                self.variants = files
                 self.isLoading = false
             }
         } catch {
@@ -327,7 +336,7 @@ struct VariantRow: View {
                     Text(variant.displayName)
                         .font(.headline)
                         .foregroundColor(.primary)
-                    if let size = variant.size {
+                    if let size = variant.size, size > 0, !variant.isDirectoryLike {
                         Text(formatBytes(Int64(size)))
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -352,14 +361,8 @@ struct VariantRow: View {
 }
 
 struct DownloadSheet: View {
-    // F4 fix: derive variant from repo modelId instead of hardcoded "openai_whisper-base"
-    private static func deriveVariant(from repo: HFRepoInfo) -> String {
-        // Convert "author/model-name" → "author_model-name" (matches .mlpackage convention)
-        repo.modelId.replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: " ", with: "-")
-    }
-    
     let repo: HFRepoInfo
+    let variant: String
     @ObservedObject var manager: ModelManager
     let modelContext: ModelContext
     @Binding var isPresented: Bool
@@ -406,7 +409,7 @@ struct DownloadSheet: View {
                     downloadProgress = 0
                     _ = try await manager.downloadModel(
                         repo,
-                        variant: Self.deriveVariant(from: repo),
+                        variant: variant,
                         context: modelContext,
                         progress: { fraction, phase in
                             downloadProgress = fraction

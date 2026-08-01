@@ -38,7 +38,14 @@ final class DownloadedModel {
     }
     
     var displayName: String {
-        "\(author)/\(name)"
+        if author.isEmpty {
+            return name
+        }
+        // Avoid double author when `name` already contains it
+        if name.hasPrefix("\(author)/") {
+            return name
+        }
+        return "\(author)/\(name)"
     }
 }
 
