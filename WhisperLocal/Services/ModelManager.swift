@@ -70,7 +70,13 @@ final class ModelManager: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
-            availableModels = try await HuggingFaceService.shared.searchModels(query: query, coreMLOnly: coreMLOnly)
+            // Sort by downloads (most popular first) for ASR relevance
+            availableModels = try await HuggingFaceService.shared.searchModels(
+                query: query,
+                coreMLOnly: coreMLOnly,
+                sort: "downloads",
+                direction: "-1"
+            )
         } catch {
             errorMessage = error.localizedDescription
             availableModels = []
@@ -111,9 +117,10 @@ final class ModelManager: ObservableObject {
     ///   - repo: the Hugging Face repo.
     ///   - variant: the **actual directory name** inside the repo that
     ///     contains the model bundle (e.g. `openai_whisper-base` or
-    ///     `whisper-base.mlpackage`). The old code invented
-    ///     `<repoId>.mlpackage`, which does not exist in most repos, so the
-    ///     download always 404'd.
+    ///     `whisper-base.mlpackage`). For Qwen ASR multi-component models
+    ///     this can be a quantization dir like `f32/` or empty (root).
+    ///     The old code invented `<repoId>.mlpackage`, which does not exist
+    ///     in most repos, so the download always 404'd.
     func downloadModel(
         _ repo: HFRepoInfo,
         variant: String,
@@ -163,6 +170,11 @@ final class ModelManager: ObservableObject {
             let totalBytes = fileItems.reduce(Int64(0)) { $0 + Int64($1.size ?? 0) }
             _ = try DiskSpace.ensureSpace(for: max(totalBytes + 50 * 1024 * 1024, 200 * 1024 * 1024))
             
+            // For Qwen multi-component models (variant="" or quant dir like
+            // "f32/"), we must download ALL files under that path to get
+            // the complete model (encoder + decoder + embedding).
+            // For WhisperKit variants, the variant folder already contains
+            // everything needed.
             let downloadedBytes = try await HuggingFaceService.shared.downloadFiles(
                 repoId: repo.modelId,
                 files: fileItems,
@@ -177,6 +189,7 @@ final class ModelManager: ObservableObject {
             // network download, which breaks offline loading. The CoreML
             // bundles on the Hub (argmaxinc etc.) do NOT ship a tokenizer,
             // so fetch it from the matching openai/whisper-* repo.
+            // Qwen ASR models include vocab.json in the repo.
             let modelFolder = localDir.appendingPathComponent(variant)
             // For root-bundle repos the variant is empty; fall back to the
             // repo id to detect the model size.

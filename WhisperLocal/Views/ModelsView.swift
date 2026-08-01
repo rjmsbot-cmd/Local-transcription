@@ -367,6 +367,8 @@ struct VariantSelectorSheet: View {
             // The service now returns any directory that is (or contains)
             // a CoreML bundle, so `argmaxinc/whisperkit-coreml_*` repos
             // (folders named like `openai_whisper-base`) show up too.
+            // For Qwen multi-component models, it returns quant dirs (f32/)
+            // or empty (root bundle with all components).
             let files = try await HuggingFaceService.shared.listModelVariants(repoId: repo.modelId)
             await MainActor.run {
                 self.variants = files.sorted { $0.variantSortRank < $1.variantSortRank }
@@ -381,7 +383,7 @@ struct VariantSelectorSheet: View {
     }
     
     private func displayName(for path: String) -> String {
-        variants.first { $0.path == path }?.displayName ?? path
+        variants.first { $0.path == path }?.variantDisplayName ?? path
     }
 }
 
@@ -394,7 +396,7 @@ struct VariantRow: View {
         Button(action: onTap) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(variant.displayName)
+                    Text(variant.variantDisplayName)
                         .font(.headline)
                         .foregroundColor(.primary)
                     subtitle
@@ -435,6 +437,15 @@ struct VariantRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.orange.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+            // Qwen multi-component indicator
+            if variant.isQwenMultiComponent == true {
+                Text("Multi-componente")
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.purple.opacity(0.15))
                     .clipShape(Capsule())
             }
         }

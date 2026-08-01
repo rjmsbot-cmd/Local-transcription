@@ -82,6 +82,12 @@ final class HuggingFaceService {
     // 🔴 Fix #3: Cache for compatibility checks (reduces N+1 HTTP calls)
     private var compatibilityCache: [String: Bool] = [:]
     
+    // Regex for Qwen quantization subdirs: f32/, int8/, int4/, fp16/, etc.
+    private static let qwenQuantPattern = try! NSRegularExpression(
+        pattern: "^(f32|int8|int4|fp16|fp32|bf16|q[48])/?$",
+        options: [.caseInsensitive]
+    )
+    
     // MARK: - Search
     
     /// Searches the Hugging Face Hub.
@@ -90,7 +96,9 @@ final class HuggingFaceService {
     ///   `automatic-speech-recognition` models via `pipeline_tag`, which
     ///   keeps the results relevant for WhisperKit (the app only downloads
     ///   CoreML bundles). Plain PyTorch whisper repos are excluded.
-    func searchModels(query: String, limit: Int = 20, coreMLOnly: Bool = true) async throws -> [HFModel] {
+    /// - Parameter sort: optional server-side sort field ("downloads", "likes", "trendingScore", "modified").
+    /// - Parameter direction: "-1" for descending (default), "1" for ascending.
+    func searchModels(query: String, limit: Int = 20, coreMLOnly: Bool = true, sort: String = "downloads", direction: String = "-1") async throws -> [HFModel] {
         guard !query.isEmpty else { return [] }
         
         // Build the query with URLComponents so special characters in the
@@ -102,11 +110,12 @@ final class HuggingFaceService {
         var queryItems = [
             URLQueryItem(name: "search", value: query),
             URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "sort", value: "likes"),
-            URLQueryItem(name: "direction", value: "-1")
+            URLQueryItem(name: "sort", value: sort),
+            URLQueryItem(name: "direction", value: direction)
         ]
         if coreMLOnly {
             queryItems.append(URLQueryItem(name: "pipeline_tag", value: "automatic-speech-recognition"))
+            queryItems.append(URLQueryItem(name: "filter", value: "coreml"))
         }
         components.queryItems = queryItems
         guard let url = components.url else {
@@ -207,6 +216,14 @@ final class HuggingFaceService {
     /// version makes a SINGLE recursive tree call and derives the variants
     /// client-side, since the tree API returns every entry with full
     /// repo-relative paths.
+    ///
+    /// Handles two repo layouts:
+    /// 1. **WhisperKit style** (argmaxinc/*): each variant is a self-contained
+    ///    directory with AudioEncoder/TextDecoder/MelSpectrogram .mlmodelc + tokenizer
+    /// 2. **Qwen ASR style** (aufklarer/*, FluidInference/*): multi-component
+    ///    at root (encoder.mlmodelc, decoder_part1/2.mlmodelc, embedding.mlmodelc,
+    ///    encoder_fp16.mlpackage, etc.), optionally under quantization subdirs (f32/, int8/)
+    ///    — these are grouped into a single “variant” per quantization.
     func listModelVariants(repoId: String) async throws -> [HFModelFile] {
         let all = try await listFiles(repoId: repoId, recursive: true)
         
@@ -216,10 +233,10 @@ final class HuggingFaceService {
         // Edge case: repos where the CoreML bundle lives directly at the
         // repo root (AudioEncoder/TextDecoder/MelSpectrogram .mlmodelc
         // folders, no per-variant subdirectory). Expose them as a single
-        // "root bundle" variant (empty path) instead of three bogus
+        // “root bundle” variant (empty path) instead of three bogus
         // encoder/decoder entries. Must be checked on top-level entries
         // only — with a recursive listing, nested paths under any variant
-        // also contain "AudioEncoder" and "mlmodelc".
+        // also contain “AudioEncoder” and “mlmodelc”.
         let rootHasEncoder = topLevel.contains { $0.path.contains("AudioEncoder") && $0.isCoreMLBundleName }
         let rootHasDecoder = topLevel.contains { $0.path.contains("TextDecoder") && $0.isCoreMLBundleName }
         if rootHasEncoder && rootHasDecoder {
@@ -231,14 +248,48 @@ final class HuggingFaceService {
             )]
         }
         
-        // A top-level directory is a variant when it contains (at any
-        // depth) an entry whose path includes a CoreML bundle name.
+        // Detect Qwen ASR style: top-level has encoder/decoder/embedding
+        // components (or .mlpackage variants) but NO AudioEncoder/TextDecoder.
+        // These are multi-component models that must be downloaded together.
+        let hasQwenEncoder = topLevel.contains { $0.path.lowercased().contains("encoder") && $0.isCoreMLBundleName }
+        let hasQwenDecoder = topLevel.contains { $0.path.lowercased().contains("decoder") && $0.isCoreMLBundleName }
+        let hasQwenEmbedding = topLevel.contains { $0.path.lowercased().contains("embedding") && $0.isCoreMLBundleName }
+        let isQwenStyle = (hasQwenEncoder || hasQwenDecoder || hasQwenEmbedding) && !(rootHasEncoder && rootHasDecoder)
+        
+        if isQwenStyle {
+            // Group by quantization subdir if present (f32/, int8/, int4/)
+            // else single root variant.
+            let quantDirs = topLevel.filter { $0.isDirectoryLike && $0.path.lowercased().matches(qwenQuantPattern) }
+            if !quantDirs.isEmpty {
+                return quantDirs.map { dir in
+                    HFModelFile(
+                        path: dir.path,
+                        size: nil,
+                        type: "directory",
+                        lfs: nil,
+                        isQwenMultiComponent: true
+                    )
+                }.sorted { $0.variantSortRank < $1.variantSortRank }
+            } else {
+                // Single root variant containing all components
+                return [HFModelFile(
+                    path: "",
+                    size: nil,
+                    type: "directory",
+                    lfs: nil,
+                    isQwenMultiComponent: true
+                )]
+            }
+        }
+        
+        // Standard WhisperKit style: each top-level dir that contains
+        // a CoreML bundle somewhere inside is a variant.
         let variants = topLevel.filter { dir in
             guard dir.isDirectoryLike else { return false }
             let prefix = dir.path + "/"
             return all.contains { $0.path.hasPrefix(prefix) && $0.isCoreMLBundleName }
         }
-        return variants
+        return variants.sorted { $0.variantSortRank < $1.variantSortRank }
     }
 
     // MARK: - File listing
@@ -558,5 +609,15 @@ final class HuggingFaceService {
             .filter { $0 != ".." && !$0.isEmpty }
             .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "" }
             .joined(separator: "/")
+    }
+}
+
+// MARK: - String extensions for regex matching
+
+extension String {
+    /// Returns true if the string matches the given NSRegularExpression.
+    func matches(_ regex: NSRegularExpression) -> Bool {
+        let range = NSRange(location: 0, length: self.utf16.count)
+        return regex.firstMatch(in: self, options: [], range: range) != nil
     }
 }

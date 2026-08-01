@@ -75,6 +75,19 @@ struct HFModelFile: Identifiable, Codable, Hashable {
     /// variant list must NEVER fail on a missing/odd field.
     let type: String?
     let lfs: LFSPayload?
+    /// Set by `HuggingFaceService.listModelVariants` for Qwen ASR-style
+    /// variants: multi-component models (encoder + decoder + embedding)
+    /// that must be downloaded together. Optional so synthesized Codable
+    /// treats a missing key as nil (the tree API never sends it).
+    var isQwenMultiComponent: Bool?
+    
+    init(path: String, size: Int? = nil, type: String? = nil, lfs: LFSPayload? = nil, isQwenMultiComponent: Bool? = nil) {
+        self.path = path
+        self.size = size
+        self.type = type
+        self.lfs = lfs
+        self.isQwenMultiComponent = isQwenMultiComponent
+    }
     
     var isDirectory: Bool { type == "directory" }
     /// Some CoreML repos expose .mlpackage/.mlmodelc entries as symlinks
@@ -95,6 +108,20 @@ struct HFModelFile: Identifiable, Codable, Hashable {
         if path.isEmpty { return "Raíz del repositorio" }
         let raw = path.split(separator: "/").last.map(String.init) ?? path
         return Self.prettyVariantName(raw)
+    }
+    
+    /// Name shown in the variant picker / download button. Qwen ASR
+    /// multi-component variants get clearer labels instead of the raw
+    /// quant dir name ("int8" → "Cuantización: INT8").
+    var variantDisplayName: String {
+        if isQwenMultiComponent == true {
+            if path.isEmpty {
+                return "Modelo completo (todos los componentes)"
+            }
+            let cleaned = path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).uppercased()
+            return "Cuantización: \(cleaned)"
+        }
+        return displayName
     }
     
     /// Short family label (OpenAI Whisper / Distil-Whisper / …).

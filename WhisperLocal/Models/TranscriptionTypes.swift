@@ -80,6 +80,11 @@ struct TranscriptionProgress {
     let taskId: String
     let fraction: Double
     let phase: String
+    /// Seconds elapsed since the engine started processing the audio
+    /// (used to compute speed/RTF and ETA in the UI).
+    var elapsed: TimeInterval = 0
+    /// Total audio duration in seconds (known once the file is decoded).
+    var audioDuration: TimeInterval = 0
 }
 
 // MARK: - Transcription convenience init (for Views compatibility)

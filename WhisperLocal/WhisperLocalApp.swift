@@ -58,6 +58,8 @@ final class AppState: ObservableObject {
     @Published var transcriptionProgress: Double = 0
     @Published var currentPartialText = ""
     @Published var activeModelName: String?
+    @Published var transcriptionElapsed: TimeInterval = 0
+    @Published var transcriptionAudioDuration: TimeInterval = 0
     
     let audioProcessor = AudioProcessor()
     let transcriptionEngine = TranscriptionEngine()
@@ -70,6 +72,8 @@ final class AppState: ObservableObject {
     func resetProgress() {
         transcriptionProgress = 0
         currentPartialText = ""
+        transcriptionElapsed = 0
+        transcriptionAudioDuration = 0
     }
     
     // MARK: - File protection (Security #3 / F7 fix)

@@ -91,13 +91,21 @@ final class TranscriptionEngine {
             throw EngineError.transcriptionFailed("No se pudo leer el audio: \(error.localizedDescription)")
         }
 
+        let audioDuration = Double(samples.count) / 16000.0
+        let start = Date()
         let whisperResult = try await processor.transcribe(
             samples: samples,
             language: language,
             task: task,
             onProgress: { fraction, phase in
                 Task { @MainActor in
-                    progressHandler(TranscriptionProgress(taskId: "transcribe", fraction: fraction, phase: phase))
+                    progressHandler(TranscriptionProgress(
+                        taskId: "transcribe",
+                        fraction: fraction,
+                        phase: phase,
+                        elapsed: Date().timeIntervalSince(start),
+                        audioDuration: audioDuration
+                    ))
                 }
             }
         )
@@ -119,7 +127,7 @@ final class TranscriptionEngine {
         return TranscriptionResult(
             text: whisperResult.text,
             segments: segments,
-            duration: Double(samples.count) / 16000.0,
+            duration: audioDuration,
             language: whisperResult.detectedLanguage ?? (language ?? "auto")
         )
     }

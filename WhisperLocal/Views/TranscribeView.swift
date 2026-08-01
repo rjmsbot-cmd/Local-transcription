@@ -197,6 +197,19 @@ struct TranscribeView: View {
             }
             .buttonStyle(.plain)
             
+            // Voice Memos hint: recordings live in the Voice Memos app
+            // container, so they must be shared to Files first.
+            HStack(spacing: 6) {
+                Image(systemName: "mic.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("Notas de Voz: pulsa Compartir → Guardar en Archivos y luego elígelo aquí (.m4a/.caf).")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            
             // Notes import button
             Button {
                 showingNotesPicker = true
@@ -332,6 +345,16 @@ struct TranscribeView: View {
             .progressViewStyle(.linear)
             .tint(.blue)
             
+            if showSpeedMetrics {
+                HStack(spacing: 16) {
+                    Label("Velocidad: \(speedLabel)", systemImage: "gauge.with.dots.needle.50percent")
+                    Spacer()
+                    Label("Restante: ~\(etaLabel)", systemImage: "timer")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            
             if !appState.currentPartialText.isEmpty {
                 Text(appState.currentPartialText)
                     .font(.caption)
@@ -349,9 +372,33 @@ struct TranscribeView: View {
     }
     
     private var progressPhaseText: String {
-        if appState.transcriptionProgress < 0.1 { return "Preparing..." }
-        if appState.transcriptionProgress < 0.95 { return "Transcribing..." }
-        return "Finalizing..."
+        if appState.transcriptionProgress < 0.1 { return "Preparando…" }
+        if appState.transcriptionProgress < 0.95 { return "Transcribiendo…" }
+        return "Finalizando…"
+    }
+    
+    /// Real-time factor: 1× = as fast as real time, 2.5× = 2.5× faster.
+    private var showSpeedMetrics: Bool {
+        appState.transcriptionElapsed >= 1 && appState.transcriptionProgress > 0.01
+    }
+    
+    private var speedLabel: String {
+        let elapsed = appState.transcriptionElapsed
+        let fraction = appState.transcriptionProgress
+        let duration = appState.transcriptionAudioDuration
+        guard duration > 0, fraction > 0 else { return "—" }
+        let rtf = elapsed / (fraction * duration)
+        return rtf > 0 ? String(format: "%.1f×", 1.0 / rtf) : "—"
+    }
+    
+    private var etaLabel: String {
+        let elapsed = appState.transcriptionElapsed
+        let fraction = appState.transcriptionProgress
+        let duration = appState.transcriptionAudioDuration
+        guard duration > 0, fraction > 0, fraction < 1 else { return "—" }
+        let rtf = elapsed / (fraction * duration)
+        let eta = (1 - fraction) * duration * rtf
+        return ExportService.formatDuration(eta)
     }
     
     // MARK: - Result
@@ -399,6 +446,10 @@ struct TranscribeView: View {
     
     private var audioContentTypes: [UTType] {
         var types: [UTType] = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
+        // Voice Memos exports .m4a and .caf (com.apple.coreaudio-format) —
+        // make sure both are explicitly selectable in the document picker.
+        if let caf = UTType(filenameExtension: "caf") { types.append(caf) }
+        if let m4a = UTType(filenameExtension: "m4a") { types.append(m4a) }
         for ext in AudioProcessor.supportedExtensions {
             if let t = UTType(filenameExtension: ext) { types.append(t) }
         }
@@ -463,6 +514,8 @@ struct TranscribeView: View {
                 progressHandler: { progress in
                     appState.transcriptionProgress = progress.fraction
                     appState.currentPartialText = progress.phase
+                    appState.transcriptionElapsed = progress.elapsed
+                    appState.transcriptionAudioDuration = progress.audioDuration
                 }
             )
             
