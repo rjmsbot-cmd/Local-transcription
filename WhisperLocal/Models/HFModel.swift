@@ -71,7 +71,9 @@ struct HFModelFile: Identifiable, Codable, Hashable {
     var id: String { path }
     let path: String
     let size: Int?
-    let type: String // "file", "directory" or "symlink"
+    /// "file", "directory" or "symlink". Optional defensively: decoding a
+    /// variant list must NEVER fail on a missing/odd field.
+    let type: String?
     let lfs: LFSPayload?
     
     var isDirectory: Bool { type == "directory" }
@@ -224,8 +226,10 @@ struct HFModelFile: Identifiable, Codable, Hashable {
     struct LFSPayload: Codable, Hashable {
         /// Real tree API LFS payloads use `oid`, not `sha256` (verified
         /// against huggingface.co: {"oid": …, "size": …, "pointerSize": …}).
-        let oid: String
-        let size: Int
+        /// All fields optional: some entries carry `lfs: {}` or nulls, and
+        /// decoding must never fail because of it.
+        let oid: String?
+        let size: Int?
         let pointerSize: Int?
     }
 }

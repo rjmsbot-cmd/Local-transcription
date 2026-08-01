@@ -5,7 +5,7 @@ import CryptoKit
 
 enum HFError: LocalizedError {
     case networkFailed(Error)
-    case decodingFailed
+    case decodingFailed(String)
     case notFound
     case rateLimited
     case checksumMismatch(String, String)
@@ -15,8 +15,8 @@ enum HFError: LocalizedError {
         switch self {
         case .networkFailed(let err):
             return "Error de red: \(err.localizedDescription)"
-        case .decodingFailed:
-            return "Error al decodificar la respuesta de HuggingFace"
+        case .decodingFailed(let detail):
+            return "Error al decodificar la respuesta de HuggingFace\(detail.isEmpty ? "" : ": \(detail)")"
         case .notFound:
             return "Repositorio no encontrado"
         case .rateLimited:
@@ -25,6 +25,39 @@ enum HFError: LocalizedError {
             return "Integridad del archivo comprometida (SHA-256: esperado \(expected.prefix(12))… vs obtenido \(actual.prefix(12))…)"
         case .authRequired:
             return "Este repositorio requiere autenticación. Añade un token de Hugging Face en Ajustes."
+        }
+    }
+    
+    /// Turns a DecodingError into a human-readable description that names
+    /// the exact field and JSON path, so a future decode failure is
+    /// diagnosable from the on-screen message alone.
+    static func describe(_ error: DecodingError) -> String {
+        func path(_ ctx: DecodingError.Context) -> String {
+            ctx.codingPath.map(\.stringValue).joined(separator: ".")
+        }
+        switch error {
+        case .keyNotFound(let key, let ctx):
+            return "falta el campo '\(key.stringValue)' en '\(path(ctx))'"
+        case .typeMismatch(let type, let ctx):
+            return "tipo inesperado '\(type)' en '\(path(ctx))'"
+        case .valueNotFound(let type, let ctx):
+            return "valor nulo para '\(type)' en '\(path(ctx))'"
+        case .dataCorrupted(let ctx):
+            return "datos corruptos: \(ctx.debugDescription)"
+        @unknown default:
+            return error.localizedDescription
+        }
+    }
+    
+    /// Decodes with a diagnostic wrapper so every HF decode failure reports
+    /// the offending field instead of a generic message.
+    static func decodeOrThrow<T: Decodable>(_ type: T.Type, from data: Data, context: String) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch let error as DecodingError {
+            throw HFError.decodingFailed("\(context): \(describe(error))")
+        } catch {
+            throw HFError.decodingFailed("\(context): \(error.localizedDescription)")
         }
     }
 }
@@ -97,7 +130,7 @@ final class HuggingFaceService {
             throw HFError.notFound
         }
         
-        let models = try JSONDecoder().decode([HFModel].self, from: data)
+        let models = try HFError.decodeOrThrow([HFModel].self, from: data, context: "búsqueda")
         return models
     }
     
@@ -134,7 +167,7 @@ final class HuggingFaceService {
             if httpResponse.statusCode == 429 { throw HFError.rateLimited }
             throw HFError.notFound
         }
-        return try JSONDecoder().decode([HFModel].self, from: data)
+        return try HFError.decodeOrThrow([HFModel].self, from: data, context: "recomendados")
     }
     
     // MARK: - Compatibility check (with caching)
@@ -262,14 +295,14 @@ final class HuggingFaceService {
         
         // Handle both array and single object responses
         do {
-            let files = try JSONDecoder().decode([HFModelFile].self, from: data)
+            let files = try HFError.decodeOrThrow([HFModelFile].self, from: data, context: "listado de archivos")
             return files
         } catch {
             do {
-                let file = try JSONDecoder().decode(HFModelFile.self, from: data)
+                let file = try HFError.decodeOrThrow(HFModelFile.self, from: data, context: "listado de archivos")
                 return [file]
             } catch {
-                throw HFError.decodingFailed
+                throw error
             }
         }
     }
