@@ -165,8 +165,11 @@ struct TranscribeView: View {
                 Task {
                     do {
                         // Use DocumentPickerService for proper security-scoped access
+                        let sourceView = UIApplication.shared.connectedScenes
+                            .compactMap { ($0 as? UIWindowScene)?.windows.first?.rootViewController?.view }
+                            .first ?? UIView()
                         let url = try await DocumentPickerService.shared.present(
-                            source: UIApplication.shared.windows.first?.rootViewController?.view ?? UIView(),
+                            source: sourceView,
                             forAudio: true
                         )
                         // The URL from DocumentPickerService already has security-scoped access started
@@ -557,4 +560,65 @@ struct TranscribeView: View {
         importedNotesText = ""
         activeSheet = nil
     }
+
+    private func clearAudio() {
+        if let url = selectedAudioURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        selectedAudioURL = nil
+        audioDuration = 0
+        audioFileName = ""
+        transcriptionResult = nil
+    }
+    
+    private func startTranscription() async {
+        guard let audioURL = selectedAudioURL, let model = activeModel else { return }
+        
+        appState.isTranscribing = true
+        appState.resetProgress()
+        transcriptionResult = nil
+        
+        do {
+            // Load model if needed
+            try await appState.transcriptionEngine.loadModel(at: model.fullPath?.path ?? "")
+            appState.activeModelName = model.name
+            
+            let result = try await appState.transcriptionEngine.transcribe(
+                audioAt: audioURL,
+                language: selectedLanguage == "auto" ? nil : selectedLanguage,
+                task: selectedTask,
+                progressHandler: { progress in
+                    appState.transcriptionProgress = progress.fraction
+                    appState.currentPartialText = progress.phase
+                    appState.transcriptionElapsed = progress.elapsed
+                    appState.transcriptionAudioDuration = progress.audioDuration
+                }
+            )
+            
+            transcriptionResult = result
+            
+            // Save to history
+            let transcription = makeTranscription(from: result)
+            modelContext.insert(transcription)
+            
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+        
+        appState.isTranscribing = false
+    }
+    
+    private func makeTranscription(from result: TranscriptionResult) -> Transcription {
+        Transcription(
+            title: transcriptionTitle.isEmpty ? "Untitled" : transcriptionTitle,
+            fullText: result.text,
+            segments: result.segments,
+            duration: result.duration,
+            detectedLanguage: result.language,
+            modelName: activeModel?.name ?? "Unknown",
+            sourceFileName: audioFileName
+        )
+    }
+
 }
