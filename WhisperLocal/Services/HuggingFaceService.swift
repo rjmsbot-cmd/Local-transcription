@@ -259,7 +259,7 @@ final class HuggingFaceService {
         if isQwenStyle {
             // Group by quantization subdir if present (f32/, int8/, int4/)
             // else single root variant.
-            let quantDirs = topLevel.filter { $0.isDirectoryLike && $0.path.lowercased().matches(qwenQuantPattern) }
+            let quantDirs = topLevel.filter { $0.isDirectoryLike && $0.path.lowercased().matches(Self.qwenQuantPattern) }
             if !quantDirs.isEmpty {
                 return quantDirs.map { dir in
                     HFModelFile(
