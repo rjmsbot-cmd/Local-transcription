@@ -49,9 +49,6 @@ final class DocumentPickerService: ObservableObject {
 class DocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
     private let handler: (URL?, Error?) -> Void
     
-    // 🔴 Fix #2.4: Track security-scoped resource access
-    private var accessedURL: URL?
-    
     init(handler: @escaping (URL?, Error?) -> Void) {
         self.handler = handler
     }
@@ -60,12 +57,10 @@ class DocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
         guard let url = urls.first else { return }
         
         if url.startAccessingSecurityScopedResource() {
-            // 🔴 Fix #2.4: Release security-scoped resource after handler completes
-            accessedURL = url
+            // Fix: Release security-scoped resource after handler completes
+            // but only after the caller has had a chance to copy the file.
+            // We don't stop here to avoid premature release before the file is copied.
             handler(url, nil)
-            // Note: The caller (TranscribeView/RecordView) handles stopAccessing
-            // via defer in their own scope. We don't stop here to avoid
-            // premature release before the file is copied.
         } else {
             handler(nil, NSError(
                 domain: "DocumentPicker",

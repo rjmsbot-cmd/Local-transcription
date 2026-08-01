@@ -36,6 +36,12 @@ final class TranscriptionEngine {
     ///   directory instead of one file (informe, sección 1.3). We surface a
     ///   clear, actionable error rather than silently failing later.
     func loadModel(at path: String) async throws {
+        // If the same model folder is already loaded, skip reload.
+        if whisperProcessorLoaded, loadedModelPath == path {
+            print("[TranscriptionEngine] Modelo ya cargado: \(path)")
+            return
+        }
+
         unloadModel()
 
         var isDirectory: ObjCBool = false

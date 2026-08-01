@@ -24,8 +24,7 @@ struct TranscribeView: View {
     @Query(sort: \DownloadedModel.downloadedAt, order: .reverse) private var allModels: [DownloadedModel]
     @ObservedObject var documentPickerService = DocumentPickerService.shared
     
-    @State private var showingFilePicker = false
-    @State private var selectedAudioURL: URL?
+        @State private var selectedAudioURL: URL?
     @State private var audioDuration: TimeInterval = 0
     @State private var audioFileName = ""
     @State private var transcriptionTitle = ""
@@ -79,13 +78,6 @@ struct TranscribeView: View {
             }
             .navigationTitle("Whisper Local")
             .background(Color(.systemGroupedBackground))
-            .fileImporter(
-                isPresented: $showingFilePicker,
-                allowedContentTypes: audioContentTypes,
-                allowsMultipleSelection: false
-            ) { result in
-                handleFileImport(result)
-            }
             .fileImporter(
                 isPresented: $showingNotesPicker,
                 allowedContentTypes: [.text, .utf8PlainText, .rtf],
@@ -170,7 +162,48 @@ struct TranscribeView: View {
     private var audioPickerCard: some View {
         VStack(spacing: 12) {
             Button {
-                showingFilePicker = true
+                Task {
+                    do {
+                        // Use DocumentPickerService for proper security-scoped access
+                        let url = try await DocumentPickerService.shared.present(
+                            source: UIApplication.shared.windows.first?.rootViewController?.view ?? UIView(),
+                            forAudio: true
+                        )
+                        // The URL from DocumentPickerService already has security-scoped access started
+                        let accessing = url.startAccessingSecurityScopedResource()
+                        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                        
+                        let tempURL = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("audio_\(UUID().uuidString)")
+                            .appendingPathExtension(url.pathExtension)
+                        do {
+                            try? FileManager.default.removeItem(at: tempURL)
+                            try FileManager.default.copyItem(at: url, to: tempURL)
+                        } catch {
+                            errorMessage = "No se pudo copiar el archivo: \(error.localizedDescription)"
+                            showError = true
+                            return
+                        }
+                        
+                        selectedAudioURL = tempURL
+                        audioFileName = url.deletingPathExtension().lastPathComponent
+                        transcriptionTitle = audioFileName
+                        transcriptionResult = nil
+                        
+                        Task {
+                            do {
+                                audioDuration = try appState.audioProcessor.getAudioDuration(at: tempURL)
+                            } catch {
+                                audioDuration = 0
+                            }
+                        }
+                    } catch {
+                        if (error as NSError).code != -1 { // Not cancelled
+                            errorMessage = error.localizedDescription
+                            showError = true
+                        }
+                    }
+                }
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "doc.badge.plus")
@@ -444,18 +477,6 @@ struct TranscribeView: View {
     
     // MARK: - Logic
     
-    private var audioContentTypes: [UTType] {
-        var types: [UTType] = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
-        // Voice Memos exports .m4a and .caf (com.apple.coreaudio-format) —
-        // make sure both are explicitly selectable in the document picker.
-        if let caf = UTType(filenameExtension: "caf") { types.append(caf) }
-        if let m4a = UTType(filenameExtension: "m4a") { types.append(m4a) }
-        for ext in AudioProcessor.supportedExtensions {
-            if let t = UTType(filenameExtension: ext) { types.append(t) }
-        }
-        return types
-    }
-    
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -467,8 +488,14 @@ struct TranscribeView: View {
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("audio_\(UUID().uuidString)")
                 .appendingPathExtension(url.pathExtension)
-            try? FileManager.default.removeItem(at: tempURL)
-            try? FileManager.default.copyItem(at: url, to: tempURL)
+            do {
+                try? FileManager.default.removeItem(at: tempURL)
+                try FileManager.default.copyItem(at: url, to: tempURL)
+            } catch {
+                errorMessage = "No se pudo copiar el archivo: \(error.localizedDescription)"
+                showError = true
+                return
+            }
             
             selectedAudioURL = tempURL
             audioFileName = url.deletingPathExtension().lastPathComponent
@@ -476,7 +503,11 @@ struct TranscribeView: View {
             transcriptionResult = nil
             
             Task {
-                audioDuration = (try? appState.audioProcessor.getAudioDuration(at: tempURL)) ?? 0
+                do {
+                    audioDuration = try appState.audioProcessor.getAudioDuration(at: tempURL)
+                } catch {
+                    audioDuration = 0
+                }
             }
             
         case .failure(let error):
@@ -484,69 +515,7 @@ struct TranscribeView: View {
             showError = true
         }
     }
-    
-    private func clearAudio() {
-        if let url = selectedAudioURL {
-            try? FileManager.default.removeItem(at: url)
-        }
-        selectedAudioURL = nil
-        audioDuration = 0
-        audioFileName = ""
-        transcriptionResult = nil
-    }
-    
-    private func startTranscription() async {
-        guard let audioURL = selectedAudioURL, let model = activeModel else { return }
-        
-        appState.isTranscribing = true
-        appState.resetProgress()
-        transcriptionResult = nil
-        
-        do {
-            // Load model if needed
-            try await appState.transcriptionEngine.loadModel(at: model.fullPath?.path ?? "")
-            appState.activeModelName = model.name
-            
-            let result = try await appState.transcriptionEngine.transcribe(
-                audioAt: audioURL,
-                language: selectedLanguage == "auto" ? nil : selectedLanguage,
-                task: selectedTask,
-                progressHandler: { progress in
-                    appState.transcriptionProgress = progress.fraction
-                    appState.currentPartialText = progress.phase
-                    appState.transcriptionElapsed = progress.elapsed
-                    appState.transcriptionAudioDuration = progress.audioDuration
-                }
-            )
-            
-            transcriptionResult = result
-            
-            // Save to history
-            let transcription = makeTranscription(from: result)
-            modelContext.insert(transcription)
-            
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-        }
-        
-        appState.isTranscribing = false
-    }
-    
-    private func makeTranscription(from result: TranscriptionResult) -> Transcription {
-        Transcription(
-            title: transcriptionTitle.isEmpty ? "Untitled" : transcriptionTitle,
-            fullText: result.text,
-            segments: result.segments,
-            duration: result.duration,
-            detectedLanguage: result.language,
-            modelName: activeModel?.name ?? "Unknown",
-            sourceFileName: audioFileName
-        )
-    }
-    
-    // MARK: - Notes Import
-    
+
     private func handleNotesImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
