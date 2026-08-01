@@ -16,7 +16,7 @@ final class DocumentPickerService: ObservableObject {
             ? [
                 UTType(filenameExtension: "caf") ?? .audio,
                 UTType(filenameExtension: "m4a") ?? .audio,
-                .mp3, .wav, .aiff, .aifc, .audio
+                .mp3, .wav, .aiff, .audio
             ]
             : [
                 UTType.item,
