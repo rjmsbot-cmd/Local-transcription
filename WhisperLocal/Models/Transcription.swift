@@ -1,6 +1,81 @@
 import Foundation
 import SwiftData
 
+// MARK: - Codable value types (stored as JSON inside Transcription)
+//
+// These are lightweight value types persisted as JSON blobs inside the
+// `Transcription` SwiftData model (`segmentsJSON` / `wordTimestampsJSON`).
+// They are intentionally NOT SwiftData models — SwiftData cannot reliably
+// nest @Model types inside other @Model types, and the previous @Model +
+// Codable combination produced unstable metadata.
+
+/// A transcribed segment — plain Codable struct.
+struct TranscriptionSegment: Codable, Equatable {
+    var startTime: TimeInterval
+    var endTime: TimeInterval
+    var text: String
+    var tokens: [Int]
+    var tokenLogProbs: [[Double]]
+    var temperature: Double
+    var avgLogProb: Double
+    var compressionRatio: Double
+    var noSpeechProb: Double
+    
+    init(
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        text: String,
+        tokens: [Int] = [],
+        tokenLogProbs: [[Double]] = [],
+        temperature: Double = 0,
+        avgLogProb: Double = 0,
+        compressionRatio: Double = 0,
+        noSpeechProb: Double = 0
+    ) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+        self.tokens = tokens
+        self.tokenLogProbs = tokenLogProbs
+        self.temperature = temperature
+        self.avgLogProb = avgLogProb
+        self.compressionRatio = compressionRatio
+        self.noSpeechProb = noSpeechProb
+    }
+    
+    // MARK: - ExportService compatibility
+    
+    var start: TimeInterval { startTime }
+    var end: TimeInterval { endTime }
+    
+    var startTimeFormatted: String {
+        String(format: "%02d:%02d", Int(startTime) / 60, Int(startTime) % 60)
+    }
+    
+    var endTimeFormatted: String {
+        String(format: "%02d:%02d", Int(endTime) / 60, Int(endTime) % 60)
+    }
+}
+
+/// Word-level timestamp — plain Codable struct.
+struct TranscriptionWordTimestamp: Codable, Equatable {
+    var word: String
+    var start: TimeInterval
+    var end: TimeInterval
+    
+    init(word: String, start: TimeInterval, end: TimeInterval) {
+        self.word = word
+        self.start = start
+        self.end = end
+    }
+}
+
+// MARK: - SwiftData root model
+//
+// NOTE: the persisted schema below is UNCHANGED from previous builds
+// (same stored property names/types), so existing on-device stores keep
+// opening without migration errors.
+
 @Model
 final class Transcription {
     var id: UUID
@@ -16,7 +91,7 @@ final class Transcription {
     var useVad: Bool
     var wordTimestampsEnabled: Bool
     
-    // Segments stored as encoded JSON (SwiftData doesn't support nested @Model arrays well)
+    // Segments stored as encoded JSON (SwiftData doesn't support nested struct arrays)
     var segmentsJSON: String
     var wordTimestampsJSON: String
     var specialResultsJSON: String
@@ -53,12 +128,16 @@ final class Transcription {
         self.specialResultsJSON = specialResults != nil ? Self.encode(specialResults!) : "{}"
     }
     
+    // MARK: - Computed properties (decoded on demand)
+    
     var segments: [TranscriptionSegment] {
-        Self.decode(segmentsJSON) ?? []
+        get { Self.decode(segmentsJSON) ?? [] }
+        set { segmentsJSON = Self.encode(newValue) }
     }
     
     var wordTimestamps: [TranscriptionWordTimestamp] {
-        Self.decode(wordTimestampsJSON) ?? []
+        get { Self.decode(wordTimestampsJSON) ?? [] }
+        set { wordTimestampsJSON = Self.encode(newValue) }
     }
     
     var specialResults: SpecialResults? {
@@ -83,136 +162,15 @@ final class Transcription {
         fullText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
     }
 
-    private static func encode<T: Codable>(_ value: T) -> String {
-        (try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "{}"
+    // JSON helpers — static to avoid @Model macro backing-field issues
+    private static func encode<T: Encodable>(_ value: T) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let str = String(data: data, encoding: .utf8) else { return "{}" }
+        return str
     }
     
-    private static func decode<T: Codable>(_ json: String) -> T? {
+    private static func decode<T: Decodable>(_ json: String) -> T? {
         guard let data = json.data(using: .utf8) else { return nil }
-        return (try? JSONDecoder().decode(T.self, from: data))
-    }
-}
-
-@Model
-final class TranscriptionSegment: Codable {
-    enum CodingKeys: String, CodingKey {
-        case startTime, endTime, text, tokens, tokenLogProbs, temperature, avgLogProb, compressionRatio, noSpeechProb
-    }
-    
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        startTime = try container.decode(TimeInterval.self, forKey: .startTime)
-        endTime = try container.decode(TimeInterval.self, forKey: .endTime)
-        text = try container.decode(String.self, forKey: .text)
-        let decodedTokens = try container.decode([Int].self, forKey: .tokens)
-        let decodedLogProbs = try container.decode([[Double]].self, forKey: .tokenLogProbs)
-        tokensJSON = Self.encodeJSON(decodedTokens)
-        tokenLogProbsJSON = Self.encodeJSON(decodedLogProbs)
-        temperature = try container.decode(Double.self, forKey: .temperature)
-        avgLogProb = try container.decode(Double.self, forKey: .avgLogProb)
-        compressionRatio = try container.decode(Double.self, forKey: .compressionRatio)
-        noSpeechProb = try container.decode(Double.self, forKey: .noSpeechProb)
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(startTime, forKey: .startTime)
-        try container.encode(endTime, forKey: .endTime)
-        try container.encode(text, forKey: .text)
-        try container.encode(tokens, forKey: .tokens)
-        try container.encode(tokenLogProbs, forKey: .tokenLogProbs)
-        try container.encode(temperature, forKey: .temperature)
-        try container.encode(avgLogProb, forKey: .avgLogProb)
-        try container.encode(compressionRatio, forKey: .compressionRatio)
-        try container.encode(noSpeechProb, forKey: .noSpeechProb)
-    }
-    var startTime: TimeInterval
-    var endTime: TimeInterval
-    var text: String
-    var tokensJSON: String
-    var tokenLogProbsJSON: String
-    var temperature: Double
-    var avgLogProb: Double
-    var compressionRatio: Double
-    var noSpeechProb: Double
-    
-    init(
-        startTime: TimeInterval,
-        endTime: TimeInterval,
-        text: String,
-        tokens: [Int],
-        tokenLogProbs: [[Double]],
-        temperature: Double,
-        avgLogProb: Double,
-        compressionRatio: Double,
-        noSpeechProb: Double
-    ) {
-        self.startTime = startTime
-        self.endTime = endTime
-        self.text = text
-        tokensJSON = Self.encodeJSON(tokens)
-        tokenLogProbsJSON = Self.encodeJSON(tokenLogProbs)
-        self.temperature = temperature
-        self.avgLogProb = avgLogProb
-        self.compressionRatio = compressionRatio
-        self.noSpeechProb = noSpeechProb
-    }
-
-    private static func encodeJSON<T: Encodable>(_ value: T) -> String {
-        (try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "[]"
-    }
-    
-
-    // MARK: - Computed properties for ExportService compatibility
-    
-    var start: TimeInterval { startTime }
-    var end: TimeInterval { endTime }
-    
-    var startTimeFormatted: String {
-        String(format: "%02d:%02d", Int(startTime) / 60, Int(startTime) % 60)
-    }
-    
-    var endTimeFormatted: String {
-        String(format: "%02d:%02d", Int(endTime) / 60, Int(endTime) % 60)
-    }
-    
-    var tokens: [Int] {
-        get { (try? JSONDecoder().decode([Int].self, from: tokensJSON.data(using: .utf8)!)) ?? [] }
-        set { tokensJSON = (try? String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]" }
-    }
-    
-    var tokenLogProbs: [[Double]] {
-        get { (try? JSONDecoder().decode([[Double]].self, from: tokenLogProbsJSON.data(using: .utf8)!)) ?? [] }
-        set { if let data = try? JSONEncoder().encode(newValue), let str = String(data: data, encoding: .utf8) { tokenLogProbsJSON = str } else { tokenLogProbsJSON = "[]" } }
-    }
-}
-
-@Model
-final class TranscriptionWordTimestamp: Codable {
-    enum CodingKeys: String, CodingKey {
-        case word, start, end
-    }
-    
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        word = try container.decode(String.self, forKey: .word)
-        start = try container.decode(TimeInterval.self, forKey: .start)
-        end = try container.decode(TimeInterval.self, forKey: .end)
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(word, forKey: .word)
-        try container.encode(start, forKey: .start)
-        try container.encode(end, forKey: .end)
-    }
-    var word: String
-    var start: TimeInterval
-    var end: TimeInterval
-    
-    init(word: String, start: TimeInterval, end: TimeInterval) {
-        self.word = word
-        self.start = start
-        self.end = end
+        return try? JSONDecoder().decode(T.self, from: data)
     }
 }

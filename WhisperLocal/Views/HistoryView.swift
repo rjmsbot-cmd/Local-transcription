@@ -142,7 +142,7 @@ struct TranscriptionDetailView: View {
                     
                     if showTimestamps {
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(transcription.segments.enumerated()), id: \.element.id) { index, seg in
+                            ForEach(Array(transcription.segments.enumerated()), id: \.offset) { index, seg in
                                 HStack(alignment: .top, spacing: 12) {
                                     Text(seg.startTimeFormatted)
                                         .font(.caption.monospacedDigit())

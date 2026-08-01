@@ -6,18 +6,49 @@ import LocalAuthentication
 struct WhisperLocalApp: App {
     @State private var appState = AppState()
     
+    /// Shared model container with a crash-safe fallback.
+    ///
+    /// The persisted schema is stable across builds (see Transcription.swift),
+    /// so existing on-device stores open normally. If the store is ever
+    /// unrecoverable (corruption, incompatible schema), the app falls back to
+    /// an in-memory container instead of crashing on launch.
+    private var sharedModelContainer: ModelContainer = {
+        let schema = Schema([
+            DownloadedModel.self,
+            Transcription.self
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        
+        do {
+            return try ModelContainer(for: schema, configurations: [configuration])
+        } catch {
+            print("[WhisperLocalApp] ModelContainer fallback (store error): \(error.localizedDescription)")
+            let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            do {
+                return try ModelContainer(for: schema, configurations: [memoryConfig])
+            } catch {
+                fatalError("No se pudo crear el contenedor de datos: \(error.localizedDescription)")
+            }
+        }
+    }()
+    
     var body: some Scene {
         WindowGroup {
             RootTabView()
-                .environmentObject(appState) // C9 fix: use .environmentObject for ObservableObject
-                // Biometric lock: authenticate on app launch/resume
+                .environmentObject(appState)
                 .task {
+                    // Biometric lock: authenticate on app launch/resume.
+                    // Non-blocking: if biometrics are unavailable or the user
+                    // cancels, the app stays usable (protected data at rest is
+                    // still encrypted by NSFileProtectionComplete).
                     if BiometricLock.isEnabled {
-                        _ = try? await BiometricLock.authenticate(reason: "Autenticación requerida para acceder a tus transcripciones")
+                        _ = try? await BiometricLock.authenticate(
+                            reason: "Autenticación requerida para acceder a tus transcripciones"
+                        )
                     }
                 }
         }
-        .modelContainer(for: [DownloadedModel.self, Transcription.self])
+        .modelContainer(sharedModelContainer)
     }
 }
 

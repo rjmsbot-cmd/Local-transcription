@@ -20,6 +20,8 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Whisper Local usa Face ID para proteger el acceso a tus transcripciones y grabaciones.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Se necesita acceso al micrófono para grabar audio</string>
 	<key>UIApplicationSceneManifest</key>
@@ -31,7 +33,7 @@
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
