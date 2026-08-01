@@ -156,7 +156,7 @@ struct ModelsView: View {
     
     private func performSearch() {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        Task { await manager?.searchModels(query: searchQuery) }
+        Task { await manager?.searchModels(query: searchQuery, coreMLOnly: coremlOnly) }
     }
     
     private func refresh() {
@@ -278,6 +278,11 @@ struct VariantSelectorSheet: View {
                                 onTap: { selectedVariant = variant.path }
                             )
                         }
+                        Section {
+                            Text("Los sufijos de tamaño (p. ej. 547 MB) son variantes cuantizadas: ocupan menos memoria con una pérdida mínima de precisión.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     .listStyle(.insetGrouped)
                     
@@ -306,7 +311,7 @@ struct VariantSelectorSheet: View {
                     .background(Color(.systemGroupedBackground))
                 }
             }
-            .navigationTitle("Cuantización: \(repo.displayName)")
+            .navigationTitle("Variantes de \(repo.displayName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -326,7 +331,7 @@ struct VariantSelectorSheet: View {
             // (folders named like `openai_whisper-base`) show up too.
             let files = try await HuggingFaceService.shared.listModelVariants(repoId: repo.modelId)
             await MainActor.run {
-                self.variants = files
+                self.variants = files.sorted { $0.variantSortRank < $1.variantSortRank }
                 self.isLoading = false
             }
         } catch {
@@ -354,11 +359,7 @@ struct VariantRow: View {
                     Text(variant.displayName)
                         .font(.headline)
                         .foregroundColor(.primary)
-                    if let size = variant.size, size > 0, !variant.isDirectoryLike {
-                        Text(formatBytes(Int64(size)))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    subtitle
                 }
                 Spacer()
                 if isSelected {
@@ -373,8 +374,32 @@ struct VariantRow: View {
         .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
     }
     
-    private func formatBytes(_ b: Int64) -> String {
-        let f = ByteCountFormatter(); f.countStyle = .file; return f.string(fromByteCount: b)
+    /// Subtitle with family, model size and quantization badge.
+    @ViewBuilder
+    private var subtitle: some View {
+        HStack(spacing: 6) {
+            if !variant.variantFamily.isEmpty {
+                Text(variant.variantFamily)
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            if !variant.variantModelSize.isEmpty {
+                Text(variant.variantModelSize)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            if let q = variant.variantSizeSuffix {
+                Text(q)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+        }
     }
 }
 

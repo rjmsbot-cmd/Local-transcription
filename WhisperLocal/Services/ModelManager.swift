@@ -60,11 +60,11 @@ final class ModelManager: ObservableObject {
     
     // MARK: - Search
     
-    func searchModels(query: String) async {
+    func searchModels(query: String, coreMLOnly: Bool = true) async {
         isLoading = true
         errorMessage = nil
         do {
-            availableModels = try await HuggingFaceService.shared.searchModels(query: query)
+            availableModels = try await HuggingFaceService.shared.searchModels(query: query, coreMLOnly: coreMLOnly)
         } catch {
             errorMessage = error.localizedDescription
             availableModels = []

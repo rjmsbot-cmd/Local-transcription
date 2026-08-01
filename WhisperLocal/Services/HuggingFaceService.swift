@@ -51,7 +51,13 @@ final class HuggingFaceService {
     
     // MARK: - Search
     
-    func searchModels(query: String, limit: Int = 20) async throws -> [HFModel] {
+    /// Searches the Hugging Face Hub.
+    ///
+    /// - Parameter coreMLOnly: when true (default), restricts the query to
+    ///   `automatic-speech-recognition` models via `pipeline_tag`, which
+    ///   keeps the results relevant for WhisperKit (the app only downloads
+    ///   CoreML bundles). Plain PyTorch whisper repos are excluded.
+    func searchModels(query: String, limit: Int = 20, coreMLOnly: Bool = true) async throws -> [HFModel] {
         guard !query.isEmpty else { return [] }
         
         // Build the query with URLComponents so special characters in the
@@ -60,12 +66,16 @@ final class HuggingFaceService {
         components.scheme = "https"
         components.host = "huggingface.co"
         components.path = "/api/models"
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "search", value: query),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "sort", value: "likes"),
             URLQueryItem(name: "direction", value: "-1")
         ]
+        if coreMLOnly {
+            queryItems.append(URLQueryItem(name: "pipeline_tag", value: "automatic-speech-recognition"))
+        }
+        components.queryItems = queryItems
         guard let url = components.url else {
             throw HFError.networkFailed(NSError(domain: "HF", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"]))
         }
