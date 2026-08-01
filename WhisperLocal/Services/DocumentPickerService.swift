@@ -11,14 +11,21 @@ final class DocumentPickerService: ObservableObject {
     // so the delegate isn't deallocated before the picker finishes.
     private var activeDelegate: DocumentPickerDelegate?
     
-    func present(source: UIView) async throws -> URL {
-        let picker = UIDocumentPickerViewController(
-            forOpeningContentTypes: [
+    func present(source: UIView, forAudio: Bool = false) async throws -> URL {
+        let contentTypes: [UTType] = forAudio
+            ? [
+                UTType(filenameExtension: "caf") ?? .audio,
+                UTType(filenameExtension: "m4a") ?? .audio,
+                .mp3, .wav, .aiff, .aifc, .audio
+            ]
+            : [
                 UTType.item,
                 UTType.text,
                 UTType.plainText,
                 UTType.rtf
-            ],
+            ]
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: contentTypes,
             asCopy: true
         )
         picker.allowsMultipleSelection = false
