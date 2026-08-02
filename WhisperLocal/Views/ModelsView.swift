@@ -213,6 +213,8 @@ struct ModelRow: View {
     @ObservedObject var manager: ModelManager
     @Environment(\.modelContext) private var modelContext
     @State private var showDelete = false
+    @State private var loadErrorMessage: String?
+    @State private var showLoadError = false
     
     var body: some View {
         HStack {
@@ -247,11 +249,20 @@ struct ModelRow: View {
                                     .foregroundColor(.orange)
                             }
                             .accessibilityLabel("Descargar de memoria")
+                        } else if isLoadingThisModel {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityLabel("Cargando en memoria")
                         } else {
                             Button {
                                 Task {
                                     guard let path = model.fullPath?.path else { return }
-                                    try? await appState.transcriptionEngine.loadModel(at: path)
+                                    do {
+                                        try await appState.transcriptionEngine.loadModel(at: path)
+                                    } catch {
+                                        loadErrorMessage = error.localizedDescription
+                                        showLoadError = true
+                                    }
                                 }
                             } label: {
                                 Image(systemName: "play.circle.fill")
@@ -259,10 +270,16 @@ struct ModelRow: View {
                                     .foregroundColor(.green)
                             }
                             .accessibilityLabel("Cargar en memoria")
+                            .disabled(appState.transcriptionEngine.isLoadingModel)
                         }
                     }
                     .onReceive(appState.transcriptionEngine.objectWillChange) { _ in
                         // Re-render when the model memory state changes.
+                    }
+                    .alert("No se pudo cargar el modelo", isPresented: $showLoadError) {
+                        Button("OK", role: .cancel) {}
+                    } message: {
+                        Text(loadErrorMessage ?? "Error desconocido")
                     }
                 } else {
                     // Leftover from before the Round 6 filter (e.g. a Qwen
@@ -293,6 +310,13 @@ struct ModelRow: View {
     /// True when this model folder is the one currently loaded in memory.
     private var isModelLoaded: Bool {
         appState.transcriptionEngine.isModelLoaded(at: model.fullPath?.path)
+    }
+
+    /// True while THIS model folder is the one being loaded (spinner on row).
+    private var isLoadingThisModel: Bool {
+        guard let path = model.fullPath?.path else { return false }
+        return appState.transcriptionEngine.isLoadingModel
+            && appState.transcriptionEngine.loadingModelPath == path
     }
 
     private var statusColor: Color {

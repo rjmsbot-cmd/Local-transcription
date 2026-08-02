@@ -144,12 +144,12 @@ struct TranscribeView: View {
                 HStack(spacing: 5) {
                     Image(systemName: engineLoaded ? "memorychip.fill" : "memorychip")
                         .font(.caption2)
-                    Text(engineLoaded ? "En memoria" : "No cargado en memoria")
+                    Text(engineStatusText)
                         .font(.caption2.weight(.medium))
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .background((engineLoaded ? Color.green : Color.orange).opacity(0.15))
+                .background(engineStatusColor.opacity(0.15))
                 .clipShape(Capsule())
             } else {
                 HStack(spacing: 6) {
@@ -477,6 +477,16 @@ struct TranscribeView: View {
 
     private var engineLoaded: Bool {
         appState.transcriptionEngine.whisperProcessorLoaded
+    }
+
+    private var engineStatusText: String {
+        if appState.transcriptionEngine.isLoadingModel { return "Cargando…" }
+        return engineLoaded ? "En memoria" : "No cargado en memoria"
+    }
+
+    private var engineStatusColor: Color {
+        if appState.transcriptionEngine.isLoadingModel { return .blue }
+        return engineLoaded ? .green : .orange
     }
 
     /// Copies a picked file (already a sandbox copy from the picker) into a

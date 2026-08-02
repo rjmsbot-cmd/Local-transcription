@@ -20,11 +20,34 @@ final class TranscriptionEngine: ObservableObject {
     // status pills, etc.).
     @Published private(set) var whisperProcessorLoaded = false
     @Published private(set) var loadedModelPath: String?
+    /// True while a model is being loaded into memory (WhisperKit init can
+    /// take several seconds for large models) — drives spinners in the UI.
+    @Published private(set) var isLoadingModel = false
+    /// Resolved folder of the model currently being loaded, so each row can
+    /// show its own spinner instead of a global one.
+    @Published private(set) var loadingModelPath: String?
+
+    /// Guards against stale async work: every load/unload bumps it, and an
+    /// in-flight `loadModel` discards its result if the generation moved on
+    /// (e.g. the user hit ⏏ while the model was still loading).
+    private var loadGeneration = 0
 
     /// True when the given model folder is the one currently loaded in memory.
     func isModelLoaded(at path: String?) -> Bool {
-        guard let path, let loadedModelPath else { return false }
-        return whisperProcessorLoaded && loadedModelPath == path
+        guard let path, whisperProcessorLoaded, let loadedModelPath else { return false }
+        return loadedModelPath == Self.resolvedFolder(for: path)
+    }
+
+    /// WhisperKit needs the **folder** containing the full model bundle. If a
+    /// call passes a single file path (the download layer historically stored
+    /// one file), resolve to its containing folder so every comparison and
+    /// load is consistent.
+    private static func resolvedFolder(for path: String) -> String {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return path
+        }
+        return (path as NSString).deletingLastPathComponent
     }
 
     var modelMemoryFormatted: String {
@@ -45,26 +68,43 @@ final class TranscriptionEngine: ObservableObject {
     ///   directory instead of one file (informe, sección 1.3). We surface a
     ///   clear, actionable error rather than silently failing later.
     func loadModel(at path: String) async throws {
+        let folderPath = Self.resolvedFolder(for: path)
+
         // If the same model folder is already loaded, skip reload.
-        if whisperProcessorLoaded, loadedModelPath == path {
-            print("[TranscriptionEngine] Modelo ya cargado: \(path)")
+        if whisperProcessorLoaded, loadedModelPath == folderPath {
+            print("[TranscriptionEngine] Modelo ya cargado: \(folderPath)")
             return
         }
 
-        unloadModel()
+        let generation = loadGeneration + 1
+        loadGeneration = generation
+        isLoadingModel = true
+        loadingModelPath = folderPath
+        whisperProcessorLoaded = false
+        loadedModelPath = nil
 
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
-            throw EngineError.modelFileNotFound(path)
+        // Serialize with any in-flight unload: the processor actor runs
+        // these in order, so awaiting here guarantees the previous model is
+        // fully gone before we start loading the new one. (The old code
+        // spawned `Task { await processor.unload() }` fire-and-forget, which
+        // could land AFTER the load and silently unload the fresh model.)
+        await processor.unload()
+
+        defer {
+            isLoadingModel = false
+            loadingModelPath = nil
         }
-        let folderPath = isDirectory.boolValue ? path : (path as NSString).deletingLastPathComponent
 
         do {
             try await processor.loadModel(folderPath: folderPath)
+            // A newer load/unload superseded us while we were loading; don't
+            // clobber the state it set.
+            guard generation == loadGeneration else { return }
             whisperProcessorLoaded = true
             loadedModelPath = folderPath
             print("[TranscriptionEngine] Modelo cargado: \(folderPath)")
         } catch {
+            guard generation == loadGeneration else { return }
             whisperProcessorLoaded = false
             loadedModelPath = nil
             print("[TranscriptionEngine] Fallo al cargar el modelo: \(error.localizedDescription)")
@@ -73,9 +113,16 @@ final class TranscriptionEngine: ObservableObject {
     }
 
     func unloadModel() {
-        print("[TranscriptionEngine] Descargando modelo")
+        // Bump the generation so any in-flight loadModel discards its result.
+        // The UI state flips immediately; the actual processor teardown is
+        // serialized on the processor actor (and any later loadModel awaits
+        // it before loading).
+        loadGeneration += 1
+        isLoadingModel = false
+        loadingModelPath = nil
         whisperProcessorLoaded = false
         loadedModelPath = nil
+        print("[TranscriptionEngine] Descargando modelo")
         Task { await processor.unload() }
     }
 
