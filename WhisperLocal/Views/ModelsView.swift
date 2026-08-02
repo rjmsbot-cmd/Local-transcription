@@ -133,7 +133,7 @@ struct ModelsView: View {
             } else {
                 List {
                     if !manager!.downloadedModels.isEmpty {
-                        Section("Descargados (\(manager!.downloadedModels.count))") {
+                        Section {
                             ForEach(manager!.downloadedModels) { model in
                                 ModelRow(model: model, manager: manager!)
                             }
@@ -142,6 +142,8 @@ struct ModelsView: View {
                                     try? manager!.removeModel(manager!.downloadedModels[index], context: modelContext)
                                 }
                             }
+                        } header: {
+                            Text("Descargados (\(manager!.downloadedModels.count))").font(.headline)
                         } footer: {
                             Text("▶ Carga el modelo en memoria (RAM) para poder transcribir. ⏏ Lo libera de la memoria; los archivos descargados se conservan en el iPhone.")
                         }
