@@ -31,7 +31,7 @@ final class ShareViewController: UIViewController {
 
         let titleLabel = UILabel()
         titleLabel.text = "Whisper Local"
-        titleLabel.font = .preferredFont(forTextStyle: .title3, weight: .semibold)
+        titleLabel.font = .preferredFont(forTextStyle: .title3)
         titleLabel.textAlignment = .center
 
         statusLabel.text = "Guardando audio…"
