@@ -142,6 +142,8 @@ struct ModelsView: View {
                                     try? manager!.removeModel(manager!.downloadedModels[index], context: modelContext)
                                 }
                             }
+                        } footer: {
+                            Text("▶ Carga el modelo en memoria (RAM) para poder transcribir. ⏏ Lo libera de la memoria; los archivos descargados se conservan en el iPhone.")
                         }
                     }
                     if manager!.hasSearched {
@@ -227,12 +229,39 @@ struct ModelRow: View {
             Spacer()
             if model.status == .ready {
                 if model.isWhisperKitCompatibleFolder {
-                    Button {
-                        Task {
-                            guard let path = model.fullPath else { return }
-                            try await appState.transcriptionEngine.loadModel(at: path.path)
+                    HStack(spacing: 8) {
+                        if isModelLoaded {
+                            Text("En memoria")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.green.opacity(0.15))
+                                .clipShape(Capsule())
+                            Button {
+                                appState.transcriptionEngine.unloadModel()
+                            } label: {
+                                Image(systemName: "eject.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(.orange)
+                            }
+                            .accessibilityLabel("Descargar de memoria")
+                        } else {
+                            Button {
+                                Task {
+                                    guard let path = model.fullPath?.path else { return }
+                                    try? await appState.transcriptionEngine.loadModel(at: path)
+                                }
+                            } label: {
+                                Image(systemName: "play.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(.green)
+                            }
+                            .accessibilityLabel("Cargar en memoria")
                         }
-                    } label: { Image(systemName: "play.fill").foregroundColor(.green) }
+                    }
+                    .onReceive(appState.transcriptionEngine.objectWillChange) { _ in
+                        // Re-render when the model memory state changes.
+                    }
                 } else {
                     // Leftover from before the Round 6 filter (e.g. a Qwen
                     // model): WhisperKit can never load this folder, so
@@ -258,6 +287,12 @@ struct ModelRow: View {
     }
     
     @EnvironmentObject private var appState: AppState
+
+    /// True when this model folder is the one currently loaded in memory.
+    private var isModelLoaded: Bool {
+        appState.transcriptionEngine.isModelLoaded(at: model.fullPath?.path)
+    }
+
     private var statusColor: Color {
         switch model.status {
         case .ready: return .green

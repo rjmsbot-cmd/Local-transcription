@@ -32,7 +32,34 @@
 		B1000017 /* BiometricLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017; };
 		B1000018 /* DocumentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018; };
 		B1000019 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000011; };
+		B100001A /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019; };
+		D2000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000001; };
+		D2000002 /* WhisperLocalShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D1000003; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D8000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A0000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D6000001;
+			remoteInfo = WhisperLocalShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D7000004 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				D2000002 /* WhisperLocalShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A2000001 /* WhisperLocalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperLocalApp.swift; sourceTree = "<group>"; };
@@ -57,6 +84,10 @@
 		A2000016 /* DiskSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/DiskSpace.swift; sourceTree = "<group>"; };
 		A2000017 /* BiometricLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricLock.swift; sourceTree = "<group>"; };
 		A2000018 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerSheet.swift; sourceTree = "<group>"; };
+		A2000019 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
+		D1000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		D1000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D1000003 /* WhisperLocalShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WhisperLocalShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A9500002 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>"; };
 		A9500004 /* DocumentPickerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerService.swift; sourceTree = "<group>"; };
 		A3000001 /* WhisperLocal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhisperLocal.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -71,6 +102,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D7000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -78,6 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				A5000002 /* WhisperLocal */,
+				D5000001 /* WhisperLocalShareExtension */,
 				A5000006 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -133,15 +172,26 @@
 				A2000014 /* RecordingService.swift */,
 				A2000017 /* BiometricLock.swift */,
 				A2000018 /* DocumentPickerSheet.swift */,
+				A2000019 /* InboxStore.swift */,
 				A9500004 /* DocumentPickerService.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		D5000001 /* WhisperLocalShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				D1000001 /* ShareViewController.swift */,
+				D1000002 /* Info.plist */,
+			);
+			path = WhisperLocalShareExtension;
 			sourceTree = "<group>";
 		};
 		A5000006 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				A3000001 /* WhisperLocal.app */,
+				D1000003 /* WhisperLocalShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -156,10 +206,12 @@
 				A7000001 /* Sources */,
 				A4000001 /* Frameworks */,
 				A7000002 /* Resources */,
+				D7000004 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D8000002 /* PBXTargetDependency */,
 			);
 			name = WhisperLocal;
 			packageProductDependencies = (
@@ -168,6 +220,23 @@
 			productName = WhisperLocal;
 			productReference = A3000001;
 			productType = "com.apple.product-type.application";
+		};
+		D6000001 /* WhisperLocalShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D9000003;
+			buildPhases = (
+				D7000001 /* Sources */,
+				D7000002 /* Frameworks */,
+				D7000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WhisperLocalShareExtension;
+			productName = WhisperLocalShareExtension;
+			productReference = D1000003;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -193,6 +262,7 @@
 			projectRoot = "";
 			targets = (
 				A6000001 /* WhisperLocal */,
+				D6000001 /* WhisperLocalShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -203,6 +273,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				B1000019 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -237,10 +314,30 @@
 				B1000016 /* DocumentPickerService.swift in Sources */,
 				B1000017 /* BiometricLock.swift in Sources */,
 				B1000018 /* DocumentPickerSheet.swift in Sources */,
+				B100001A /* InboxStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D7000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D2000001 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D8000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D6000001 /* WhisperLocalShareExtension */;
+			targetProxy = D8000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A8000002 /* Debug */ = {
@@ -389,6 +486,50 @@
 			};
 			name = Release;
 		};
+		D9000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WhisperLocalShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.local.WhisperLocal.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D9000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WhisperLocalShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.local.WhisperLocal.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -406,6 +547,15 @@
 			buildConfigurations = (
 				A8000005 /* Debug */,
 				A8000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D9000003 /* Build configuration list for PBXNativeTarget "WhisperLocalShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D9000001 /* Debug */,
+				D9000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

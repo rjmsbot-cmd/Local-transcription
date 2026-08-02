@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import SwiftData
 
 /// Orchestrates model loading and transcription on top of `WhisperProcessor`
@@ -10,13 +11,21 @@ import SwiftData
 /// API is kept identical to before so `TranscribeView`, `RecordView`,
 /// `ModelsView` and `SettingsView` don't need to change.
 @MainActor
-final class TranscriptionEngine {
+final class TranscriptionEngine: ObservableObject {
     private let processor = WhisperProcessor()
 
     // Mirrors the actor's state on the main actor so the UI can keep
-    // reading these synchronously, exactly like before.
-    private(set) var whisperProcessorLoaded = false
-    private(set) var loadedModelPath: String?
+    // reading these synchronously, exactly like before. @Published lets
+    // the views react to load/unload immediately (load/unload toggles,
+    // status pills, etc.).
+    @Published private(set) var whisperProcessorLoaded = false
+    @Published private(set) var loadedModelPath: String?
+
+    /// True when the given model folder is the one currently loaded in memory.
+    func isModelLoaded(at path: String?) -> Bool {
+        guard let path, let loadedModelPath else { return false }
+        return whisperProcessorLoaded && loadedModelPath == path
+    }
 
     var modelMemoryFormatted: String {
         // WhisperKit doesn't expose exact live memory usage today. Rather

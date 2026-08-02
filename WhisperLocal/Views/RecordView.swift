@@ -5,12 +5,12 @@ import AVFoundation
 struct RecordView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \DownloadedModel.downloadedAt, order: .reverse) private var allModels: [DownloadedModel]
     @Query(filter: #Predicate<DownloadedModel> { $0.isDefault }) private var defaultModels: [DownloadedModel]
     
     @StateObject private var recorder = RecordingService.shared
-    @State private var showingVoiceMemos = false
-    @State private var showingFilePicker = false
+    @State private var inboxFiles: [URL] = []
     @State private var selectedAudioURL: URL?
     @State private var audioFileName = ""
     @State private var audioDuration: TimeInterval = 0
@@ -44,6 +44,9 @@ struct RecordView: View {
                     
                     if recorder.state == .idle && selectedAudioURL == nil {
                         recordAndImportSection
+                        if !inboxFiles.isEmpty {
+                            inboxSection
+                        }
                     }
                     
                     if recorder.state == .recording || recorder.state == .paused {
@@ -71,19 +74,10 @@ struct RecordView: View {
             }
             .navigationTitle("Record")
             .background(Color(.systemGroupedBackground))
-            .fileImporter(
-                isPresented: $showingFilePicker,
-                allowedContentTypes: [.audio],
-                allowsMultipleSelection: false
-            ) { result in
-                handleFileImport(result)
-            }
-            .fileImporter(
-                isPresented: $showingVoiceMemos,
-                allowedContentTypes: [.audio],
-                allowsMultipleSelection: false
-            ) { result in
-                handleVoiceMemoImport(result)
+            .onAppear { refreshInbox() }
+            .onChange(of: scenePhase) { _, phase in
+                // Refresh when returning from the share sheet / Voice Memos.
+                if phase == .active { refreshInbox() }
             }
             .sheet(isPresented: $showingExport) {
                 if let result = transcriptionResult {
@@ -193,9 +187,11 @@ struct RecordView: View {
             
             // Import options
             HStack(spacing: 12) {
-                // Voice Memos
+                // Voice Memos (same picker: it can browse iCloud Drive → Notas
+                // de Voz; direct sharing from Voice Memos arrives in the inbox
+                // section below).
                 Button {
-                    showingVoiceMemos = true
+                    importAudio()
                 } label: {
                     VStack(spacing: 8) {
                         ZStack {
@@ -218,7 +214,7 @@ struct RecordView: View {
                 
                 // File picker
                 Button {
-                    showingFilePicker = true
+                    importAudio()
                 } label: {
                     VStack(spacing: 8) {
                         ZStack {
@@ -239,7 +235,70 @@ struct RecordView: View {
                 }
                 .buttonStyle(.plain)
             }
+            
+            Text("Notas de Voz: usa Compartir → Whisper Local desde la app Notas de Voz. Lo que compartas aparecerá abajo en «Notas de voz recibidas».")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+    
+    // MARK: - Inbox (Share Extension)
+    
+    private var inboxSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "tray.and.arrow.down.fill")
+                    .foregroundColor(.purple)
+                Text("Notas de voz recibidas (\(inboxFiles.count))")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            
+            ForEach(inboxFiles, id: \.self) { url in
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform")
+                        .foregroundColor(.purple)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(url.deletingPathExtension().lastPathComponent)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(1)
+                        Text("\(inboxDate(url)) · \(inboxSize(url))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Button {
+                        useInboxFile(url)
+                    } label: {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.blue)
+                    }
+                    .accessibilityLabel("Usar esta nota")
+                    
+                    Button {
+                        InboxStore.delete(url)
+                        refreshInbox()
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                    }
+                    .accessibilityLabel("Eliminar")
+                }
+                .padding(10)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            
+            Text("Llegan aquí cuando compartes una grabación desde Notas de Voz (o Archivos) con Compartir → Whisper Local.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
     }
     
     // MARK: - Recording Controls
@@ -512,62 +571,75 @@ struct RecordView: View {
     }
     
     // MARK: - Logic
-    
-    private func handleFileImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("audio_\(UUID().uuidString)")
-                .appendingPathExtension(url.pathExtension)
-            try? FileManager.default.removeItem(at: tempURL)
-            try? FileManager.default.copyItem(at: url, to: tempURL)
-            
+
+    private func importAudio() {
+        Task {
+            do {
+                let url = try await DocumentPickerService.shared.present(forAudio: true)
+                let tempURL = try Self.copyAudioToTemp(url)
+                selectedAudioURL = tempURL
+                audioFileName = url.deletingPathExtension().lastPathComponent
+                transcriptionTitle = audioFileName
+                transcriptionResult = nil
+                
+                Task {
+                    audioDuration = (try? appState.audioProcessor.getAudioDuration(at: tempURL)) ?? 0
+                }
+            } catch {
+                if (error as NSError).code != -1 { // Not cancelled
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
+    }
+
+    private static func copyAudioToTemp(_ url: URL) throws -> URL {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("audio_\(UUID().uuidString)")
+            .appendingPathExtension(url.pathExtension)
+        try? FileManager.default.removeItem(at: tempURL)
+        try FileManager.default.copyItem(at: url, to: tempURL)
+        return tempURL
+    }
+
+    private func refreshInbox() {
+        inboxFiles = InboxStore.incomingAudioFiles()
+    }
+
+    /// Picks an inbox file: copy to temp so clearing the selection never
+    /// deletes the original inbox item.
+    private func useInboxFile(_ url: URL) {
+        do {
+            let tempURL = try Self.copyAudioToTemp(url)
             selectedAudioURL = tempURL
             audioFileName = url.deletingPathExtension().lastPathComponent
             transcriptionTitle = audioFileName
             transcriptionResult = nil
-            
             Task {
                 audioDuration = (try? appState.audioProcessor.getAudioDuration(at: tempURL)) ?? 0
             }
-            
-        case .failure(let error):
-            errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = "No se pudo copiar el archivo: \(error.localizedDescription)"
             showError = true
         }
     }
-    
-    private func handleVoiceMemoImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("voicememo_\(UUID().uuidString).m4a")
-            try? FileManager.default.removeItem(at: tempURL)
-            try? FileManager.default.copyItem(at: url, to: tempURL)
-            
-            selectedAudioURL = tempURL
-            audioFileName = "Nota de voz"
-            transcriptionTitle = "Nota de voz"
-            transcriptionResult = nil
-            
-            Task {
-                audioDuration = (try? appState.audioProcessor.getAudioDuration(at: tempURL)) ?? 0
-            }
-            
-        case .failure(let error):
-            errorMessage = error.localizedDescription
-            showError = true
-        }
+
+    private func inboxDate(_ url: URL) -> String {
+        guard let date = url.fileModificationDate else { return "" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
-    
+
+    private func inboxSize(_ url: URL) -> String {
+        let bytes = url.fileSizeBytes ?? 0
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+
     private func clearSelection() {
         if let url = selectedAudioURL {
             try? FileManager.default.removeItem(at: url)

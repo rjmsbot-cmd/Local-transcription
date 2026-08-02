@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
-import UIKit
 
 /// Single-sheet driver for TranscribeView (see ModelsView for why stacking
 /// two `.sheet` modifiers on one view breaks).
@@ -22,9 +21,8 @@ struct TranscribeView: View {
     @EnvironmentObject var appState: AppState
     @Query(filter: #Predicate<DownloadedModel> { $0.isDefault }) private var defaultModels: [DownloadedModel]
     @Query(sort: \DownloadedModel.downloadedAt, order: .reverse) private var allModels: [DownloadedModel]
-    @ObservedObject var documentPickerService = DocumentPickerService.shared
-    
-        @State private var selectedAudioURL: URL?
+
+    @State private var selectedAudioURL: URL?
     @State private var audioDuration: TimeInterval = 0
     @State private var audioFileName = ""
     @State private var transcriptionTitle = ""
@@ -78,6 +76,9 @@ struct TranscribeView: View {
             }
             .navigationTitle("Whisper Local")
             .background(Color(.systemGroupedBackground))
+            .onReceive(appState.transcriptionEngine.objectWillChange) { _ in
+                // Re-render when the model memory state changes (load/unload).
+            }
             .fileImporter(
                 isPresented: $showingNotesPicker,
                 allowedContentTypes: [.text, .utf8PlainText, .rtf],
@@ -138,6 +139,18 @@ struct TranscribeView: View {
                 .padding(.vertical, 4)
                 .background(.blue.opacity(0.1))
                 .clipShape(Capsule())
+
+                // Live memory state — updates via onReceive above.
+                HStack(spacing: 5) {
+                    Image(systemName: engineLoaded ? "memorychip.fill" : "memorychip")
+                        .font(.caption2)
+                    Text(engineLoaded ? "En memoria" : "No cargado en memoria")
+                        .font(.caption2.weight(.medium))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background((engineLoaded ? Color.green : Color.orange).opacity(0.15))
+                .clipShape(Capsule())
             } else {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -164,35 +177,15 @@ struct TranscribeView: View {
             Button {
                 Task {
                     do {
-                        // Use DocumentPickerService for proper security-scoped access
-                        let sourceView = UIApplication.shared.connectedScenes
-                            .compactMap { ($0 as? UIWindowScene)?.windows.first?.rootViewController?.view }
-                            .first ?? UIView()
-                        let url = try await DocumentPickerService.shared.present(
-                            source: sourceView,
-                            forAudio: true
-                        )
-                        // The URL from DocumentPickerService already has security-scoped access started
-                        let accessing = url.startAccessingSecurityScopedResource()
-                        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                        
-                        let tempURL = FileManager.default.temporaryDirectory
-                            .appendingPathComponent("audio_\(UUID().uuidString)")
-                            .appendingPathExtension(url.pathExtension)
-                        do {
-                            try? FileManager.default.removeItem(at: tempURL)
-                            try FileManager.default.copyItem(at: url, to: tempURL)
-                        } catch {
-                            errorMessage = "No se pudo copiar el archivo: \(error.localizedDescription)"
-                            showError = true
-                            return
-                        }
-                        
+                        // DocumentPickerService returns a sandbox copy of the
+                        // picked file (asCopy: true) — no security-scoped access.
+                        let url = try await DocumentPickerService.shared.present(forAudio: true)
+                        let tempURL = try Self.copyAudioToTemp(url)
                         selectedAudioURL = tempURL
                         audioFileName = url.deletingPathExtension().lastPathComponent
                         transcriptionTitle = audioFileName
                         transcriptionResult = nil
-                        
+
                         Task {
                             do {
                                 audioDuration = try appState.audioProcessor.getAudioDuration(at: tempURL)
@@ -233,13 +226,15 @@ struct TranscribeView: View {
             }
             .buttonStyle(.plain)
             
-            // Voice Memos hint: recordings live in the Voice Memos app
-            // container, so they must be shared to Files first.
+            // Voice Memos: the fastest path is Share → Whisper Local from the
+            // Voice Memos app itself (the note lands in the Record tab). With
+            // iCloud sync enabled, the picker can also browse iCloud Drive →
+            // Notas de Voz directly.
             HStack(spacing: 6) {
                 Image(systemName: "mic.fill")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text("Notas de Voz: pulsa Compartir → Guardar en Archivos y luego elígelo aquí (.m4a/.caf).")
+                Text("Notas de Voz: usa Compartir → Whisper Local desde la app Notas de Voz, o elige el audio en iCloud Drive → Notas de Voz desde este selector.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -347,7 +342,7 @@ struct TranscribeView: View {
     
     private var startButton: some View {
         Button {
-            // The audio was already copied to a temp file in handleFileImport,
+            // The audio was already copied to a temp file when it was picked,
             // so no security-scoped access is needed here.
             Task { await startTranscription() }
         } label: {
@@ -479,44 +474,20 @@ struct TranscribeView: View {
     }
     
     // MARK: - Logic
-    
-    private func handleFileImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            
-            // Copy to temp (security scoped bookmark won't persist)
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("audio_\(UUID().uuidString)")
-                .appendingPathExtension(url.pathExtension)
-            do {
-                try? FileManager.default.removeItem(at: tempURL)
-                try FileManager.default.copyItem(at: url, to: tempURL)
-            } catch {
-                errorMessage = "No se pudo copiar el archivo: \(error.localizedDescription)"
-                showError = true
-                return
-            }
-            
-            selectedAudioURL = tempURL
-            audioFileName = url.deletingPathExtension().lastPathComponent
-            transcriptionTitle = audioFileName
-            transcriptionResult = nil
-            
-            Task {
-                do {
-                    audioDuration = try appState.audioProcessor.getAudioDuration(at: tempURL)
-                } catch {
-                    audioDuration = 0
-                }
-            }
-            
-        case .failure(let error):
-            errorMessage = error.localizedDescription
-            showError = true
-        }
+
+    private var engineLoaded: Bool {
+        appState.transcriptionEngine.whisperProcessorLoaded
+    }
+
+    /// Copies a picked file (already a sandbox copy from the picker) into a
+    /// fresh temp location so the original stays untouched.
+    private static func copyAudioToTemp(_ url: URL) throws -> URL {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("audio_\(UUID().uuidString)")
+            .appendingPathExtension(url.pathExtension)
+        try? FileManager.default.removeItem(at: tempURL)
+        try FileManager.default.copyItem(at: url, to: tempURL)
+        return tempURL
     }
 
     private func handleNotesImport(_ result: Result<[URL], Error>) {

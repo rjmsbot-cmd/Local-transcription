@@ -177,6 +177,9 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .sheet(isPresented: $showAbout) { AboutView() }
             .onAppear { syncHFToken() }
+            .onReceive(appState.transcriptionEngine.objectWillChange) { _ in
+                // Keep the model status + Unload button in sync with load/unload.
+            }
         }
     }
     
