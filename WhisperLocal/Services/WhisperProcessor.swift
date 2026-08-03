@@ -114,7 +114,15 @@ actor WhisperProcessor {
         options.task = (task == .translate) ? .translate : .transcribe
         options.language = language
         options.detectLanguage = (language == nil)
-        options.wordTimestamps = true
+        // Perf: the UI only ever renders segment-level timestamps (start/end),
+        // so word-level timestamping (which adds per-word decode overhead and
+        // memory on every window) buys nothing here. Turning it off is a free
+        // speed-up on long audio.
+        options.wordTimestamps = false
+        // Chunked decode concurrency. WhisperKit's safe iOS default is 4;
+        // "Máxima velocidad" mode (Settings → Rendimiento) dedicates every
+        // CPU core to it instead.
+        options.concurrentWorkerCount = PerformanceSettings.concurrentWorkerCount
 
         let audioDuration = Double(samples.count) / 16000.0
         let start = Date()

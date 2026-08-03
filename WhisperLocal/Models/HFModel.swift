@@ -163,6 +163,14 @@ struct HFModelFile: Identifiable, Codable, Hashable {
         return nil
     }
     
+    /// True for distilled/turbo variants: much faster than the full-size
+    /// model with nearly the same quality (large-v3-turbo ≈ 6× faster than
+    /// large-v3). Surfaced as a "⚡ Rápido" badge in the variant picker.
+    var isTurboVariant: Bool {
+        let lower = path.lowercased()
+        return lower.contains("turbo") || lower.contains("distil")
+    }
+
     /// Sort rank: root bundle first, then tiny → large v3, Distil after OpenAI.
     var variantSortRank: Int {
         if path.isEmpty { return -1 }

@@ -8,6 +8,9 @@ struct SettingsView: View {
     @AppStorage("defaultLanguage") private var defaultLanguage = "auto"
     @AppStorage("defaultExportFormat") private var defaultExportFormat = "txt"
     @AppStorage("hapticEnabled") private var hapticEnabled = true
+    // Transcription performance toggle (Settings → Rendimiento). Uses the
+    // same UserDefaults key as `PerformanceSettings.maxSpeedMode`.
+    @AppStorage(PerformanceSettings.maxSpeedModeKey) private var maxSpeedMode = false
     // HF token for gated repos (stored in UserDefaults, encrypted at rest)
     @AppStorage("hfToken") private var hfToken = ""
     @State private var showAbout = false
@@ -143,6 +146,19 @@ struct SettingsView: View {
                     Toggle(isOn: $hapticEnabled) {
                         Label("Haptic Feedback", systemImage: "hand.tap")
                     }
+                }
+                
+                // Performance
+                Section {
+                    Toggle(isOn: $maxSpeedMode) {
+                        Label("Máxima velocidad", systemImage: "bolt.fill")
+                    }
+                } header: {
+                    Text("Rendimiento")
+                } footer: {
+                    Text(maxSpeedMode
+                         ? "Todos los núcleos del chip trabajan en la transcripción (y los timestamps por palabra están desactivados). Si el progreso va a saltos o notas inestabilidad, vuelve al modo estándar."
+                         : "WhisperKit decodifica el audio por fragmentos (hasta 30 s cada uno) y procesa 4 a la vez. Activa “Máxima velocidad” para dedicarle todos los núcleos del chip. Los modelos turbo (⚡, p. ej. large-v3-turbo ~950 MB) transcriben ≈6× más rápido que large-v3 con calidad casi idéntica.")
                 }
                 
                 // Info

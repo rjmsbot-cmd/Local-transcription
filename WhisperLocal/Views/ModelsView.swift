@@ -505,6 +505,14 @@ struct VariantRow: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
+            if variant.isTurboVariant {
+                Text("⚡ Rápido")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.18))
+                    .clipShape(Capsule())
+            }
             if let q = variant.variantSizeSuffix {
                 Text(q)
                     .font(.caption2.weight(.semibold))

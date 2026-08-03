@@ -33,6 +33,7 @@
 		B1000018 /* DocumentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018; };
 		B1000019 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000011; };
 		B100001A /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019; };
+		B100001B /* PerformanceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001A; };
 		D2000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000001; };
 		D2000002 /* WhisperLocalShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D1000003; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -85,6 +86,7 @@
 		A2000017 /* BiometricLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricLock.swift; sourceTree = "<group>"; };
 		A2000018 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerSheet.swift; sourceTree = "<group>"; };
 		A2000019 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
+		A200001A /* PerformanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceSettings.swift; sourceTree = "<group>"; };
 		D1000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		D1000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D1000003 /* WhisperLocalShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WhisperLocalShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -173,6 +175,7 @@
 				A2000017 /* BiometricLock.swift */,
 				A2000018 /* DocumentPickerSheet.swift */,
 				A2000019 /* InboxStore.swift */,
+				A200001A /* PerformanceSettings.swift */,
 				A9500004 /* DocumentPickerService.swift */,
 			);
 			path = Services;
@@ -315,6 +318,7 @@
 				B1000017 /* BiometricLock.swift in Sources */,
 				B1000018 /* DocumentPickerSheet.swift in Sources */,
 				B100001A /* InboxStore.swift in Sources */,
+				B100001B /* PerformanceSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
