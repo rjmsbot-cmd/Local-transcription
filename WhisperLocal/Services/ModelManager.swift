@@ -149,6 +149,41 @@ final class ModelManager: ObservableObject {
     }
     
     // MARK: - Search
+
+    /// Known WhisperKit-CoreML repos that actually ship CoreML bundles
+    /// (.mlmodelc) WhisperKit can load — curated so the search always
+    /// surfaces installable options, regardless of HF's name-based search.
+    static let curatedWhisperKitRepos = [
+        "argmaxinc/whisperkit-coreml",      // canonical (8M+ downloads)
+        "nickmcdonald/whisperkit-coreml",   // community quantized builds
+        "openb3/whisperkit-coreml",         // community builds
+        "LucasLarson/whisperkit-coreml"     // community builds
+    ]
+
+    /// Builds an `HFRepoInfo` for a curated repo id (no extra network call).
+    static func curatedRepo(_ repoId: String) -> HFRepoInfo {
+        let parts = repoId.split(separator: "/")
+        return HFModel(
+            id: repoId,
+            modelId: repoId,
+            author: parts.first.map(String.init) ?? "",
+            pipelineTag: "automatic-speech-recognition",
+            tags: ["coreml", "whisper"],
+            downloads: nil,
+            likes: nil,
+            lastModified: nil
+        )
+    }
+
+    /// True when the query plausibly targets Whisper/CoreML models, or when
+    /// it directly names one of the curated repos ("nickmcdonald", …).
+    static func curatedRepoMatchesQuery(_ repoId: String, query: String) -> Bool {
+        let q = query.lowercased()
+        let whisperHints = ["whisper", "coreml", "turbo", "large", "v3", "distil", "base", "small", "medium", "argmax", "rápido", "rapido", "realtime", "asr", "voz", "transcribir"]
+        if whisperHints.contains(where: { q.contains($0) }) { return true }
+        let lower = repoId.lowercased()
+        return q.split(separator: " ").contains { lower.contains($0) }
+    }
     
     func searchModels(query: String, coreMLOnly: Bool = true) async {
         hasSearched = true
@@ -167,7 +202,20 @@ final class ModelManager: ObservableObject {
             // WhisperKit cannot load (Qwen3-ASR, Parakeet, Nemotron...) are
             // ranked last and surfaced with a clear "not compatible" badge
             // instead of silently opening an empty variant picker.
-            availableModels = await HuggingFaceService.shared.classifySearchResults(results)
+            let classified = await HuggingFaceService.shared.classifySearchResults(results)
+            // Ronda 12: HF search is by NAME, so "whisper large v3" never
+            // returns argmaxinc/whisperkit-coreml (its name has none of those
+            // tokens) — the one repo every Whisper user needs was invisible.
+            // Inject the known WhisperKit-CoreML repos (curated, .compatible)
+            // whenever the query sounds Whisper-ish, deduped vs HF hits.
+            let curated = Self.curatedWhisperKitRepos.compactMap { repoId -> ModelSearchResult? in
+                guard !classified.contains(where: { $0.model.modelId == repoId }) else { return nil }
+                if Self.curatedRepoMatchesQuery(repoId, query: query) {
+                    return ModelSearchResult(model: Self.curatedRepo(repoId), status: .compatible)
+                }
+                return nil
+            }
+            availableModels = curated + classified?
         } catch {
             errorMessage = error.localizedDescription
             availableModels = []

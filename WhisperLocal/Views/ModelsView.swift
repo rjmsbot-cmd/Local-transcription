@@ -41,13 +41,13 @@ struct ModelsView: View {
     @State private var diskSpace: String = ""
     @State private var searchTask: Task<Void, Never>?
 
-    /// Featured recommendation: Whisper Large V3 Turbo QUANTIZED (954 MB),
-    /// installed directly from the canonical WhisperKit repo with one tap.
-    /// Ronda 11: the full-precision fp16 variant (3.2 GB) made iPhones sit
-    /// on "cargando" for minutes (memory/ANE pressure, device heats up and
-    /// the load never completes). The 954 MB quantization is ~6× faster than
-    /// large-v3, loads in seconds and is nearly identical in quality — the
-    /// fp16 stays available in the variant picker for anyone who wants it.
+    /// Featured recommendation: Whisper Large V3 Turbo v20240930 (1.64 GB)
+    /// — the middle ground Raúl asked for (Ronda 12): twice the quality
+    /// headroom of the 954 MB quantization, still turbo-fast (≈6×), and a
+    /// fraction of the 3.2 GB fp16 load that made the iPhone overheat and
+    /// never finish loading. Installed directly from the canonical
+    /// WhisperKit repo with one tap; the 954 MB and 3.2 GB variants stay
+    /// available in the variant picker.
     private var featuredTurbo: HFRepoInfo {
         HFModel(
             id: "argmaxinc/whisperkit-coreml",
@@ -63,7 +63,7 @@ struct ModelsView: View {
 
     private var isFeaturedInstalled: Bool {
         manager?.downloadedModels.contains {
-            $0.name == featuredTurbo.modelId && $0.variant == "openai_whisper-large-v3_turbo_954MB"
+            $0.name == featuredTurbo.modelId && $0.variant == "openai_whisper-large-v3-v20240930_turbo"
         } ?? false
     }
 
@@ -82,7 +82,7 @@ struct ModelsView: View {
     /// an empty picker after a slow full-tree listing.
     private func openResult(_ result: ModelSearchResult) {
         switch result.status {
-        case .incompatible, .authRequired:
+        case .incompatible, .authRequired, .safetensorsOnly:
             blocking = ModelBlockAlert(repo: result.model, status: result.status)
         case .compatible, .likelyCompatible, .unknown:
             activeSheet = .variantPicker(result.model)
@@ -143,6 +143,12 @@ struct ModelsView: View {
                 return Alert(
                     title: Text("Requiere autenticación"),
                     message: Text("«\(alert.repo.displayName)» es un repositorio con acceso restringido.\n\nAñade un token de Hugging Face en Ajustes para poder descargarlo."),
+                    dismissButton: .default(Text("Entendido"))
+                )
+            case .safetensorsOnly:
+                return Alert(
+                    title: Text("Solo pesos originales"),
+                    message: Text("«\(alert.repo.displayName)» solo contiene safetensors/ONNX, no paquetes CoreML (.mlmodelc): WhisperKit no puede cargarlo.\n\nElige un repo «whisperkit-coreml» (el Destacado arriba instala el Large V3 Turbo directamente)."),
                     dismissButton: .default(Text("Entendido"))
                 )
             default:
@@ -257,7 +263,7 @@ struct ModelsView: View {
                                     FeaturedModelRow(
                                         isInstalled: isFeaturedInstalled,
                                         onInstall: {
-                                            activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo_954MB")
+                                            activeSheet = .download(featuredTurbo, "openai_whisper-large-v3-v20240930_turbo")
                                         }
                                     )
                                 }
@@ -272,17 +278,12 @@ struct ModelsView: View {
                                 Text("Resultados (\(results.count))").font(.headline)
                             } footer: {
                                 if shouldSuggestFeatured {
-                                    Text("La búsqueda no encuentra el repo por nombre (no contiene “large/turbo/v3”), así que Whisper Large V3 Turbo aparece aquí con instalación directa.")
+                                    Text("El buscador de Hugging Face no devuelve los repos «whisperkit-coreml» por nombre (no contienen “whisper large v3”), así que la app los añade siempre arriba — son los únicos que WhisperKit puede cargar. El Destacado instala el Large V3 Turbo v20240930 directamente.")
                                 }
                             }
                         } else if manager!.downloadedModels.isEmpty {
                             Section {
-                                ContentUnavailableView(
-                                    "Sin resultados",
-                                    systemImage: "magnifyingglass",
-                                    description: Text("Prueba con otro término de búsqueda.")
-                                )
-                                .padding(.vertical, 20)
+                                emptyStateRow(icon: "magnifyingglass", title: "Sin resultados", subtitle: "Prueba con otro término (p. ej. “whisper” o “turbo”).")
                             }
                         }
                     } else {
@@ -290,13 +291,13 @@ struct ModelsView: View {
                             FeaturedModelRow(
                                 isInstalled: isFeaturedInstalled,
                                 onInstall: {
-                                    activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo_954MB")
+                                    activeSheet = .download(featuredTurbo, "openai_whisper-large-v3-v20240930_turbo")
                                 }
                             )
                         } header: {
                             Text("Destacado · Instalación directa")
                         } footer: {
-                            Text("Whisper Large V3 Turbo cuantizada (954 MB): la calidad de large-v3 con ≈6× más velocidad, carga en segundos y sin calentar el móvil. La versión de precisión completa (3,2 GB) está en el selector de variantes si la quieres probar.")
+                            Text("Whisper Large V3 Turbo v20240930 (1,6 GB): turbo ≈6× más rápido que large-v3, calidad intermedia — más fiable de cargar que el fp16 de 3,2 GB y con más margen de calidad que la cuantizada de 954 MB. Las otras variantes están en el selector.")
                         }
                         if !manager!.recommendedModels.isEmpty {
                             Section("Recomendados (\(manager!.recommendedModels.count))") {
@@ -310,12 +311,7 @@ struct ModelsView: View {
                             }
                         } else if manager!.downloadedModels.isEmpty {
                             Section {
-                                ContentUnavailableView(
-                                    "Sin modelos",
-                                    systemImage: "brain",
-                                    description: Text("Busca un modelo de Whisper en Hugging Face.")
-                                )
-                                .padding(.vertical, 20)
+                                emptyStateRow(icon: "brain", title: "Sin modelos", subtitle: "Busca un modelo de Whisper en Hugging Face.")
                             }
                         }
                     }
@@ -323,6 +319,25 @@ struct ModelsView: View {
             }
         }
         .onAppear { diskSpace = manager?.diskSpaceAvailable ?? "..." }
+    }
+    
+    /// Stable empty-state row for the List (ContentUnavailableView inside a
+    /// List caused the layout jump/"se rompe el buscador" glitch: the list
+    /// would scroll down mid-keystroke and show nothing).
+    private func emptyStateRow(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(.secondary)
+            Text(title)
+                .font(.headline)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
     }
     
     private func performSearch() {
@@ -553,13 +568,19 @@ struct SearchResultRow: View {
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Color.orange.opacity(0.18))
                 .clipShape(Capsule())
+        case .safetensorsOnly:
+            Label("Solo safetensors (no CoreML)", systemImage: "xmark.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.red.opacity(0.15))
+                .clipShape(Capsule())
         }
     }
 }
 
-/// Single-tap install card for the featured turbo model (954 MB quantized
-/// since Ronda 11 — the fp16 full-precision variant kept iPhones stuck on
-/// "cargando" and overheating).
+/// Single-tap install card for the featured turbo model (v20240930, 1.64 GB
+/// since Ronda 12 — the 3.2 GB fp16 never finished loading on iPhone and the
+/// 954 MB quantized one was too aggressive for Raúl's quality bar).
 struct FeaturedModelRow: View {
     let isInstalled: Bool
     let onInstall: () -> Void
@@ -572,7 +593,7 @@ struct FeaturedModelRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Whisper Large V3 Turbo")
                     .font(.headline)
-                Text("⚡ Rápido · Precisión completa (fp16) · 3,2 GB")
+                Text("⚡ Rápido · v20240930 · ~1,6 GB")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)

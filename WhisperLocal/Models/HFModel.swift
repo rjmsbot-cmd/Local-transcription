@@ -309,6 +309,11 @@ enum ModelSearchStatus: String {
     /// CoreML-tagged ASR repo but not yet verified against the file tree.
     /// Tap opens the variant picker (which does the real check).
     case likelyCompatible
+    /// Whisper-named repo that only ships raw weights (safetensors/ONNX),
+    /// e.g. `openai/whisper-large-v3`. WhisperKit needs CoreML bundles
+    /// (.mlmodelc), so it can never load these — tapping explains instead
+    /// of showing an empty variant picker (Ronda 12).
+    case safetensorsOnly
     /// No usable signal (neither CoreML tag nor Whisper naming).
     /// Tap opens the variant picker for a definitive check.
     case unknown
@@ -325,12 +330,13 @@ enum ModelSearchStatus: String {
         case .unknown: 2
         case .authRequired: 3
         case .incompatible: 4
+        case .safetensorsOnly: 5
         }
     }
 
     var isBlocked: Bool {
         switch self {
-        case .incompatible, .authRequired: true
+        case .incompatible, .authRequired, .safetensorsOnly: true
         default: false
         }
     }

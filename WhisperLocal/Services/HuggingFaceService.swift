@@ -282,6 +282,21 @@ final class HuggingFaceService {
             // (the variant picker will retry the real check on tap).
         }
 
+        // (2b) Whisper repos that ship raw weights only (safetensors/ONNX)
+        // — OpenAI's official whisper repos are the common case. WhisperKit
+        // needs CoreML bundles (.mlmodelc), so these are dead ends: mark
+        // them blocked so the tap explains instead of opening an empty
+        // variant picker (Ronda 12). Real CoreML bundles always live in a
+        // repo whose name advertises it (whisperkit / coreml / mlmodel…).
+        if lowerRepo.contains("whisper")
+            && !lowerRepo.contains("coreml")
+            && !lowerRepo.contains("core-ml")
+            && !lowerRepo.contains("whisperkit")
+            && !lowerRepo.contains("mlmodel") {
+            cache(repoId, .safetensorsOnly)
+            return .safetensorsOnly
+        }
+
         // (3) Tag heuristics.
         let tags = model.tags?.map { $0.lowercased() } ?? []
         let hasCoreMLTag = tags.contains { $0.contains("coreml") || $0.contains("core-ml") }
