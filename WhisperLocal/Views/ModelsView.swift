@@ -403,9 +403,14 @@ struct ModelRow: View {
                             }
                             .accessibilityLabel("Descargar de memoria")
                         } else if isLoadingThisModel {
-                            ProgressView()
-                                .controlSize(.small)
-                                .accessibilityLabel("Cargando en memoria")
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(appState.transcriptionEngine.loadPhase ?? "Cargando…")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .accessibilityLabel("Cargando en memoria")
                         } else {
                             Button {
                                 Task {

@@ -66,10 +66,14 @@ struct TranscribeView: View {
                 VStack(spacing: 20) {
                     headerCard
                     
+                    // Real-time monitor — the primary content of this tab.
+                    // While a transcription runs (from any tab) it shows live
+                    // text, progress and model stats; when idle it explains
+                    // what will appear here instead of hiding.
+                    liveMonitorCard
+                    
                     if appState.isTranscribing {
-                        // Real-time monitor — shows whatever transcription is
-                        // running, regardless of which tab started it.
-                        liveMonitorCard
+                        // The monitor above is already showing everything live.
                     } else if let result = transcriptionResult {
                         resultCard(result)
                     } else {
@@ -185,17 +189,23 @@ struct TranscribeView: View {
         VStack(spacing: 14) {
             // Monitor header
             HStack(spacing: 8) {
-                Image(systemName: "waveform.and.mic")
+                Image(systemName: appState.isTranscribing ? "waveform.and.mic" : "waveform")
                     .foregroundStyle(.blue)
-                Text("Monitor en tiempo real")
+                Text(appState.isTranscribing ? "Monitor en tiempo real" : "Monitor")
                     .font(.headline)
                 Spacer()
-                if appState.transcriptionEngine.isLoadingModel {
-                    ProgressView()
-                        .controlSize(.small)
+                if appState.isTranscribing {
+                    if appState.transcriptionEngine.isLoadingModel {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 8, height: 8)
+                    }
                 } else {
                     Circle()
-                        .fill(.green)
+                        .fill(.gray)
                         .frame(width: 8, height: 8)
                 }
             }
@@ -203,9 +213,7 @@ struct TranscribeView: View {
             // Live text — auto-scrolls as tokens arrive
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(appState.currentPartialText.isEmpty
-                         ? "Esperando texto del modelo…"
-                         : appState.currentPartialText)
+                    Text(liveTextContent)
                         .font(.body)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -222,18 +230,20 @@ struct TranscribeView: View {
                 }
             }
             
-            // Progress bar
-            ProgressView(value: appState.transcriptionProgress) {
-                HStack {
-                    Text(appState.transcriptionPhase.isEmpty ? "Transcribiendo…" : appState.transcriptionPhase)
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text("\(Int(appState.transcriptionProgress * 100))%")
-                        .font(.subheadline.monospacedDigit())
+            if appState.isTranscribing {
+                // Progress bar
+                ProgressView(value: appState.transcriptionProgress) {
+                    HStack {
+                        Text(appState.transcriptionPhase.isEmpty ? "Transcribiendo…" : appState.transcriptionPhase)
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        Text("\(Int(appState.transcriptionProgress * 100))%")
+                            .font(.subheadline.monospacedDigit())
+                    }
                 }
+                .progressViewStyle(.linear)
+                .tint(.blue)
             }
-            .progressViewStyle(.linear)
-            .tint(.blue)
             
             // Performance stats
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
@@ -241,7 +251,7 @@ struct TranscribeView: View {
                 monitorStat("Velocidad", speedLabel, icon: "gauge.with.dots.needle.50percent")
                 monitorStat("Ventana", windowLabel, icon: "rectangle.split.2x1")
                 monitorStat("Tiempo", elapsedLabel, icon: "clock")
-                monitorStat("Audio", ExportService.formatDuration(appState.transcriptionAudioDuration), icon: "music.note")
+                monitorStat("Audio", audioStatLabel, icon: "music.note")
                 monitorStat("Restante", etaLabel, icon: "timer")
             }
             
@@ -264,6 +274,17 @@ struct TranscribeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
     
+    /// Placeholder text shown inside the live-text box: the idle hint when
+    /// nothing is running, the model's partial transcript while decoding.
+    private var liveTextContent: String {
+        if appState.isTranscribing {
+            return appState.currentPartialText.isEmpty
+                ? "Esperando texto del modelo…"
+                : appState.currentPartialText
+        }
+        return "Sin transcripción en curso.\n\nCuando lances una transcripción (desde Grabar, un audio importado o una nota de voz), el texto y el rendimiento del modelo aparecerán aquí en tiempo real."
+    }
+    
     private func monitorStat(_ title: String, _ value: String, icon: String) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
@@ -284,33 +305,59 @@ struct TranscribeView: View {
     }
     
     // MARK: - Live stats labels
-    
+
+    /// Tokens/s: "0.0" as soon as transcription starts (before the first
+    /// window is decoded WhisperKit reports 0 — that's not an error, so we
+    /// say so instead of hiding the value behind a "—").
     private var tokensLabel: String {
-        appState.tokensPerSecond > 0 ? String(format: "%.1f", appState.tokensPerSecond) : "—"
+        guard appState.isTranscribing else { return "—" }
+        return appState.tokensPerSecond > 0
+            ? String(format: "%.1f", appState.tokensPerSecond)
+            : "0.0"
     }
-    
+
+    /// Speed × realtime. "…" until WhisperKit reports a realtime factor.
     private var speedLabel: String {
-        appState.speedFactor > 0.01 ? String(format: "%.1f×", appState.speedFactor) : "—"
+        guard appState.isTranscribing else { return "—" }
+        return appState.speedFactor > 0.01
+            ? String(format: "%.1f×", appState.speedFactor)
+            : "…"
     }
-    
+
+    /// Current window (1-based). Was wrongly gated on tokensPerSecond>0,
+    /// which left it on "—" the whole time until decoding started; now it
+    /// follows the real window index.
     private var windowLabel: String {
-        appState.tokensPerSecond > 0 ? "\(appState.currentWindowIndex + 1)" : "—"
+        guard appState.isTranscribing else { return "—" }
+        return appState.currentWindowIndex > 0
+            ? "\(appState.currentWindowIndex + 1)"
+            : "1"
     }
-    
+
     private var elapsedLabel: String {
-        appState.transcriptionElapsed >= 1
+        guard appState.isTranscribing else { return "—" }
+        return appState.transcriptionElapsed >= 1
             ? ExportService.formatDuration(appState.transcriptionElapsed)
             : "0s"
     }
-    
+
+    /// Audio duration — "—" when idle instead of "0:00".
+    private var audioStatLabel: String {
+        guard appState.isTranscribing else { return "—" }
+        return ExportService.formatDuration(appState.transcriptionAudioDuration)
+    }
+
+    /// ETA: remaining audio ÷ current realtime speed. "…" until speed is
+    /// known (the model is warming up / decoding the first window).
     private var etaLabel: String {
+        guard appState.isTranscribing else { return "—" }
         let elapsed = appState.transcriptionElapsed
         let duration = appState.transcriptionAudioDuration
         let speed = appState.speedFactor
-        guard duration > 0, speed > 0.01, elapsed > 0 else { return "—" }
+        guard duration > 0, speed > 0.01 else { return "…" }
         let processed = min(duration, elapsed * speed)
         let remaining = max(0, duration - processed) / speed
-        return remaining > 0 ? ExportService.formatDuration(remaining) : "—"
+        return remaining > 0 ? ExportService.formatDuration(remaining) : "…"
     }
     
     // MARK: - Audio Picker
@@ -551,7 +598,9 @@ struct TranscribeView: View {
     }
 
     private var engineStatusText: String {
-        if appState.transcriptionEngine.isLoadingModel { return "Cargando…" }
+        if appState.transcriptionEngine.isLoadingModel {
+            return appState.transcriptionEngine.loadPhase ?? "Cargando…"
+        }
         return engineLoaded ? "En memoria" : "No cargado en memoria"
     }
 

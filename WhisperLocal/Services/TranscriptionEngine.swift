@@ -26,6 +26,10 @@ final class TranscriptionEngine: ObservableObject {
     /// Resolved folder of the model currently being loaded, so each row can
     /// show its own spinner instead of a global one.
     @Published private(set) var loadingModelPath: String?
+    /// What the load is doing right now ("Descargando tokenizer…",
+    /// "Preparando modelo…"), so a slow load (large fp16 models take a
+    /// while on the Neural Engine) is never a silent spinner.
+    @Published private(set) var loadPhase: String?
 
     /// Guards against stale async work: every load/unload bumps it, and an
     /// in-flight `loadModel` discards its result if the generation moved on
@@ -80,6 +84,7 @@ final class TranscriptionEngine: ObservableObject {
         loadGeneration = generation
         isLoadingModel = true
         loadingModelPath = folderPath
+        loadPhase = "Preparando modelo…"
         whisperProcessorLoaded = false
         loadedModelPath = nil
 
@@ -93,23 +98,37 @@ final class TranscriptionEngine: ObservableObject {
         defer {
             isLoadingModel = false
             loadingModelPath = nil
+            loadPhase = nil
         }
 
         // Backfill the tokenizer if it is missing (downloads that predate
         // the tokenizer step, or that were interrupted before it):
         // WhisperKit refuses to load without tokenizer.json in the model
-        // folder and would otherwise fail with a cryptic error.
+        // folder and would otherwise fail with a cryptic error. The phase
+        // makes this visible; failures are logged and the load proceeds
+        // (WhisperKit errors clearly if the tokenizer is truly needed).
         if !FileManager.default.fileExists(atPath: folderPath + "/tokenizer.json"),
            let size = HuggingFaceService.tokenizerSize(from: (folderPath as NSString).lastPathComponent) {
-            try? await HuggingFaceService.shared.downloadTokenizerFiles(
-                modelSize: size,
-                destinationURL: URL(fileURLWithPath: folderPath),
-                progress: { _, _ in }
-            )
+            loadPhase = "Descargando tokenizer…"
+            do {
+                try await HuggingFaceService.shared.downloadTokenizerFiles(
+                    modelSize: size,
+                    destinationURL: URL(fileURLWithPath: folderPath),
+                    progress: { _, _ in }
+                )
+            } catch {
+                print("[TranscriptionEngine] Tokenizer backfill falló: \(error.localizedDescription)")
+            }
+            loadPhase = "Preparando modelo…"
         }
 
         do {
+            // Large fp16 models (3 GB+) can legitimately take a couple of
+            // minutes here: the CoreML bundles are compiled for the Neural
+            // Engine on first load. Surface it instead of looking stuck.
+            let loadStart = Date()
             try await processor.loadModel(folderPath: folderPath)
+            print("[TranscriptionEngine] Modelo cargado en \(Int(Date().timeIntervalSince(loadStart)))s: \(folderPath)")
             // A newer load/unload superseded us while we were loading; don't
             // clobber the state it set.
             guard generation == loadGeneration else { return }
@@ -133,6 +152,7 @@ final class TranscriptionEngine: ObservableObject {
         loadGeneration += 1
         isLoadingModel = false
         loadingModelPath = nil
+        loadPhase = nil
         whisperProcessorLoaded = false
         loadedModelPath = nil
         print("[TranscriptionEngine] Descargando modelo")
