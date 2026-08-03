@@ -171,9 +171,31 @@ struct HFModelFile: Identifiable, Codable, Hashable {
         return lower.contains("turbo") || lower.contains("distil")
     }
 
-    /// Sort rank: root bundle first, then tiny → large v3, Distil after OpenAI.
+    /// Precision of a variant, derived from its folder name.
+    ///
+    /// WhisperKit repos (argmaxinc/whisperkit-coreml …) name quantized
+    /// variants with a size suffix (`openai_whisper-large-v3_947MB`) and
+    /// full-precision ones without it (`openai_whisper-large-v3_turbo`).
+    /// Quantization keywords are checked first so non-Whisper names like
+    /// `…-CoreML-INT8` are classified correctly too.
+    var precision: VariantPrecision {
+        let lower = path.lowercased()
+        let quantWords = ["int8", "int4", "q8", "q4", "quant", "_8bit", "_6bit", "_4bit", "6bit", "4bit", "8bit"]
+        if quantWords.contains(where: { lower.contains($0) }) { return .quantized }
+        // `_NNNMB` suffix = quantized in every argmaxinc variant name.
+        if lower.range(of: #"_\d+mb$"#, options: .regularExpression) != nil { return .quantized }
+        // Known full-precision families ship WITHOUT the size suffix.
+        if lower.contains("openai_whisper") || lower.contains("distil-whisper") { return .fullPrecision }
+        return .unknown
+    }
+
+    var isFullPrecision: Bool { precision == .fullPrecision }
+
+    /// Sort rank: root bundle first, then tiny → large v3, Distil after
+    /// OpenAI, and full-precision variants BEFORE their quantized siblings
+    /// (×10 keeps the family order, +1 pushes quantized to the end).
     var variantSortRank: Int {
-        if path.isEmpty { return -1 }
+        if path.isEmpty { return -10 }
         let lower = path.lowercased()
         var rank: Int
         if lower.contains("tiny") { rank = 1 }
@@ -185,7 +207,7 @@ struct HFModelFile: Identifiable, Codable, Hashable {
         else if lower.contains("large") { rank = 5 }
         else { rank = 50 }
         if lower.contains("distil-whisper") { rank += 20 }
-        return rank
+        return rank * 10 + (precision == .quantized ? 1 : 0)
     }
     
     /// Turns a raw variant folder name into a UI-friendly label.
@@ -261,6 +283,13 @@ struct HFModelFile: Identifiable, Codable, Hashable {
         let size: Int?
         let pointerSize: Int?
     }
+}
+
+/// Precision of a model variant (full precision fp16 vs quantized).
+enum VariantPrecision: String {
+    case fullPrecision
+    case quantized
+    case unknown
 }
 
 /// Legacy alias for compatibility with older code that references HFFileItem

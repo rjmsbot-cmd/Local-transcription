@@ -30,6 +30,28 @@ struct ModelsView: View {
     @State private var activeSheet: ModelSheet?
     @State private var diskSpace: String = ""
     @State private var searchTask: Task<Void, Never>?
+
+    /// Featured recommendation: Whisper Large V3 Turbo at FULL precision
+    /// (fp16, no size suffix = not quantized), installed directly from the
+    /// canonical WhisperKit repo with one tap — no variant browsing.
+    private var featuredTurbo: HFRepoInfo {
+        HFModel(
+            id: "argmaxinc/whisperkit-coreml",
+            modelId: "argmaxinc/whisperkit-coreml",
+            author: "argmaxinc",
+            pipelineTag: "automatic-speech-recognition",
+            tags: ["coreml", "whisper"],
+            downloads: nil,
+            likes: nil,
+            lastModified: nil
+        )
+    }
+
+    private var isFeaturedInstalled: Bool {
+        manager?.downloadedModels.contains {
+            $0.name == featuredTurbo.modelId && $0.variant == "openai_whisper-large-v3_turbo"
+        } ?? false
+    }
     
     var body: some View {
         Group {
@@ -168,22 +190,36 @@ struct ModelsView: View {
                                 .padding(.vertical, 20)
                             }
                         }
-                    } else if !manager!.recommendedModels.isEmpty {
-                        Section("Recomendados (\(manager!.recommendedModels.count))") {
-                            ForEach(manager!.recommendedModels) { repo in
-                                SearchResultRow(repo: repo) {
-                                    activeSheet = .variantPicker(repo)
+                    } else {
+                        Section {
+                            FeaturedModelRow(
+                                isInstalled: isFeaturedInstalled,
+                                onInstall: {
+                                    activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo")
+                                }
+                            )
+                        } header: {
+                            Text("Destacado · Instalación directa")
+                        } footer: {
+                            Text("Whisper Large V3 Turbo en precisión completa (fp16): la calidad de large-v3 con ≈6× más velocidad. Ocupa 3,2 GB y aprovecha al máximo el Neural Engine. La versión cuantizada (954 MB) está en el selector de variantes.")
+                        }
+                        if !manager!.recommendedModels.isEmpty {
+                            Section("Recomendados (\(manager!.recommendedModels.count))") {
+                                ForEach(manager!.recommendedModels) { repo in
+                                    SearchResultRow(repo: repo) {
+                                        activeSheet = .variantPicker(repo)
+                                    }
                                 }
                             }
-                        }
-                    } else if manager!.downloadedModels.isEmpty {
-                        Section {
-                            ContentUnavailableView(
-                                "Sin modelos",
-                                systemImage: "brain",
-                                description: Text("Busca un modelo de Whisper en Hugging Face.")
-                            )
-                            .padding(.vertical, 20)
+                        } else if manager!.downloadedModels.isEmpty {
+                            Section {
+                                ContentUnavailableView(
+                                    "Sin modelos",
+                                    systemImage: "brain",
+                                    description: Text("Busca un modelo de Whisper en Hugging Face.")
+                                )
+                                .padding(.vertical, 20)
+                            }
                         }
                     }
                 }
@@ -355,6 +391,44 @@ struct SearchResultRow: View {
     }
 }
 
+/// Single-tap install card for the featured full-precision turbo model.
+struct FeaturedModelRow: View {
+    let isInstalled: Bool
+    let onInstall: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "bolt.circle.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(.green.gradient)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Whisper Large V3 Turbo")
+                    .font(.headline)
+                Text("⚡ Rápido · Precisión completa (fp16) · 3,2 GB")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.16))
+                    .clipShape(Capsule())
+                Text("argmaxinc/whisperkit-coreml")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isInstalled {
+                Label("Descargado", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+            } else {
+                Button("Instalar", action: onInstall)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
 struct VariantSelectorSheet: View {
     let repo: HFRepoInfo
     let manager: ModelManager
@@ -391,7 +465,7 @@ struct VariantSelectorSheet: View {
                             )
                         }
                         Section {
-                            Text("Los sufijos de tamaño (p. ej. 547 MB) son variantes cuantizadas: ocupan menos memoria con una pérdida mínima de precisión.")
+                            Text("Precisión completa (fp16) es la variante sin sufijo de tamaño. Las etiquetadas “Cuantizado” (o con sufijo de MB) ocupan menos memoria con una pérdida mínima de precisión. Las marcadas ⚡ Rápido (turbo) transcriben ≈6× más rápido con calidad casi idéntica.")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -513,6 +587,21 @@ struct VariantRow: View {
                     .background(Color.green.opacity(0.18))
                     .clipShape(Capsule())
             }
+            if variant.precision == .fullPrecision {
+                Text("Precisión completa (fp16)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.15))
+                    .clipShape(Capsule())
+            } else if variant.precision == .quantized {
+                Text("Cuantizado")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.18))
+                    .clipShape(Capsule())
+            }
             if let q = variant.variantSizeSuffix {
                 Text(q)
                     .font(.caption2.weight(.semibold))
@@ -520,6 +609,11 @@ struct VariantRow: View {
                     .padding(.vertical, 2)
                     .background(Color.orange.opacity(0.15))
                     .clipShape(Capsule())
+            }
+            if variant.path.isEmpty {
+                Text("Bundle en la raíz — se descargan solo los archivos del modelo")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
         }
     }

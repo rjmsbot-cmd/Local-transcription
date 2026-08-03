@@ -175,7 +175,14 @@ final class ModelManager: ObservableObject {
                 repoId: repo.modelId,
                 path: variant
             )
-            let fileItems = allFiles.filter { !$0.isDirectory }
+            // Root-bundle repos (variant == "") mix the model files with
+            // unrelated repo content (README, .gitattributes, .safetensors
+            // weights for other formats...). Only download what WhisperKit
+            // actually needs, so "instalar la raíz" never drags in GBs of
+            // junk. Named variants are already just the model folder.
+            let fileItems = allFiles
+                .filter { !$0.isDirectory }
+                .filter { variant.isEmpty ? Self.isWhisperKitModelFile($0.path) : true }
             guard !fileItems.isEmpty else {
                 throw HFError.notFound
             }
@@ -242,6 +249,25 @@ final class ModelManager: ObservableObject {
             .replacingOccurrences(of: "..", with: "_")
     }
     
+    /// Files WhisperKit needs when a CoreML bundle lives at the repo root:
+    /// the three compiled model artifacts (.mlmodelc/.mlpackage trees),
+    /// config.json and the tokenizer files. Everything else (READMEs,
+    /// .safetensors, .onnx, .gitattributes…) is unrelated to loading and is
+    /// skipped to keep root installs lean.
+    static func isWhisperKitModelFile(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        let support = [
+            "config.json", "tokenizer.json", "vocab.json", "merges.txt",
+            "added_tokens.json", "special_tokens_map.json", "tokenizer_config.json",
+            "normalizer.json"
+        ]
+        if support.contains(where: { lower == $0 || lower.hasSuffix("/" + $0) }) { return true }
+        if lower.contains(".mlmodelc") || lower.contains(".mlpackage") { return true }
+        return ["melspectrogram", "audioencoder", "textdecoder"].contains {
+            lower.contains($0 + ".ml")
+        }
+    }
+
     /// Maps a variant folder name (e.g. `openai_whisper-base`,
     /// `whisper-large-v3-turbo`) to the matching `openai/whisper-*` repo
     /// suffix used for the tokenizer files.
