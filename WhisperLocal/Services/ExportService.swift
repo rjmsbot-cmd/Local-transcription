@@ -31,6 +31,10 @@ struct ExportService {
         var wordCount: Int {
             fullText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
         }
+        
+        /// Mirrors `Transcription.detectedLanguage` so the exporter helpers
+        /// keep working unchanged.
+        var detectedLanguage: String { language }
     }
     
     enum ExportFormat: String, CaseIterable, Identifiable {

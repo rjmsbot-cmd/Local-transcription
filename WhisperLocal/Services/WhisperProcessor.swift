@@ -121,23 +121,13 @@ actor WhisperProcessor {
 
         /// Builds a local `TranscriptionProgress` (with elapsed already
         /// measured against `start`) and hops to the main actor.
-        func emit(
-            _ fraction: Double,
-            _ phase: String,
-            wk: WhisperKit.TranscriptionProgress? = nil
-        ) {
-            let tps = wk?.timings.tokensPerSecond ?? 0
-            let speed = wk?.timings.speedFactor ?? 0
+        func emit(_ fraction: Double, _ phase: String) {
             let local = WhisperLocal.TranscriptionProgress(
                 taskId: "transcribe",
                 fraction: fraction,
                 phase: phase,
                 elapsed: Date().timeIntervalSince(start),
-                audioDuration: audioDuration,
-                partialText: wk?.text ?? "",
-                tokensPerSecond: tps.isFinite ? tps : 0,
-                speedFactor: speed.isFinite ? speed : 0,
-                windowIndex: wk?.windowId ?? 0
+                audioDuration: audioDuration
             )
             Task { @MainActor in
                 onProgress(local)
