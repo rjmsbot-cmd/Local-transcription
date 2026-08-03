@@ -373,14 +373,21 @@ final class HuggingFaceService {
     /// loading them fails (or crashes at inference) no matter how they are
     /// downloaded.
     func listModelVariants(repoId: String) async throws -> [HFModelFile] {
+        let all = try await listFiles(repoId: repoId, recursive: true)
+        return Self.detectVariants(in: all, repoId: repoId)
+    }
+
+    /// Pure variant detection over an already-fetched recursive listing
+    /// (no network calls). Shared by `listModelVariants` and
+    /// `listModelVariantOptions` so the variant picker only makes ONE tree
+    /// API call instead of two (Ronda 13).
+    static func detectVariants(in all: [HFModelFile], repoId: String) -> [HFModelFile] {
         // Architecture denylist: known non-Whisper families that WhisperKit
         // cannot load under any circumstances.
         let lowerRepo = repoId.lowercased()
         guard !Self.incompatibleArchitectureKeywords.contains(where: { lowerRepo.contains($0) }) else {
             return []
         }
-
-        let all = try await listFiles(repoId: repoId, recursive: true)
 
         // Only top-level entries (no "/" in the path) can be variants.
         let topLevel = all.filter { !$0.path.contains("/") }
@@ -420,6 +427,46 @@ final class HuggingFaceService {
             return hasWhisperKitComponents(under: dir.path + "/")
         }
         return variants.sorted { $0.variantSortRank < $1.variantSortRank }
+    }
+
+    // MARK: - Variant options (with real download sizes)
+
+    /// One installable variant plus its REAL total download size (sum of
+    /// every file under the variant subtree). The variant picker uses this
+    /// to show "1,6 GB"/"3,2 GB" next to each option and to warn when a
+    /// full-precision variant is likely too heavy for the iPhone's memory
+    /// (Ronda 13: the 3,2 GB fp16 large-v3 never finished loading on
+    /// Raúl's device; the UI now says why before the user commits to it).
+    struct ModelVariantOption: Identifiable, Hashable {
+        let file: HFModelFile
+        let totalBytes: Int64
+        var id: String { file.id }
+        var displayName: String { file.variantDisplayName }
+        /// Heavy = full-precision bundle ≥ 1,5 GB on disk (fp16 encoder
+        /// alone is ~1,3 GB and has failed to load on Raúl's iPhone).
+        var isHeavyForiPhone: Bool {
+            file.precision == .fullPrecision && totalBytes >= 1_500_000_000
+        }
+    }
+
+    /// Same as `listModelVariants` but each variant also carries the sum of
+    /// its subtree file sizes (+1,5 GB fp16 → `isHeavyForiPhone`), computed
+    /// from the SAME recursive listing (one tree API call total).
+    func listModelVariantOptions(repoId: String) async throws -> [ModelVariantOption] {
+        let all = try await listFiles(repoId: repoId, recursive: true)
+        let variants = Self.detectVariants(in: all, repoId: repoId)
+        return variants.map { variant in
+            let total: Int64
+            if variant.path.isEmpty {
+                total = all.filter { !$0.isDirectory }.reduce(0) { $0 + Int64($1.size ?? 0) }
+            } else {
+                let prefix = variant.path + "/"
+                total = all
+                    .filter { !$0.isDirectory && $0.path.hasPrefix(prefix) }
+                    .reduce(0) { $0 + Int64($1.size ?? 0) }
+            }
+            return ModelVariantOption(file: variant, totalBytes: total)
+        }
     }
 
     // MARK: - File listing
@@ -667,7 +714,20 @@ final class HuggingFaceService {
     /// files.
     static func tokenizerSize(from variant: String) -> String? {
         let lower = variant.lowercased()
-        if lower.contains("large-v3-turbo") { return "large-v3-turbo" }
+        // Date-suffixed turbo folders ("openai_whisper-large-v3-v20240930_turbo")
+        // do NOT contain the literal "large-v3-turbo" — the "-v20240930_"
+        // sits between the two parts. Detect the pieces separately so the
+        // right tokenizer (openai/whisper-large-v3-turbo) is downloaded
+        // (Ronda 13; verified: the v20240930 turbo is a 4-layer decoder
+        // model with vocab 51866 from the large-v3-turbo family).
+        if lower.contains("large-v3-turbo")
+            || (lower.contains("large-v3") && lower.contains("turbo")) {
+            return "large-v3-turbo"
+        }
+        if lower.contains("large-v2-turbo")
+            || (lower.contains("large-v2") && lower.contains("turbo")) {
+            return "large-v2-turbo"
+        }
         if lower.contains("large-v3") { return "large-v3" }
         if lower.contains("large-v2") { return "large-v2" }
         if lower.contains("large") { return "large" }

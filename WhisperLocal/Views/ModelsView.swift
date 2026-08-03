@@ -625,7 +625,7 @@ struct VariantSelectorSheet: View {
     let onVariantSelected: (String) -> Void
     let onCancel: () -> Void
     
-    @State private var variants: [HFModelFile] = []
+    @State private var variants: [HuggingFaceService.ModelVariantOption] = []
     @State private var selectedVariant: String?
     @State private var isLoading = true
     @State private var error: String?
@@ -646,17 +646,20 @@ struct VariantSelectorSheet: View {
                     )
                 } else {
                     List {
-                        ForEach(variants) { variant in
+                        ForEach(variants) { option in
                             VariantRow(
-                                variant: variant,
-                                isSelected: selectedVariant == variant.path,
-                                onTap: { selectedVariant = variant.path }
+                                option: option,
+                                isSelected: selectedVariant == option.file.path,
+                                onTap: { selectedVariant = option.file.path }
                             )
                         }
                         Section {
                             Text("Precisión completa (fp16) es la variante sin sufijo de tamaño. Las etiquetadas “Cuantizado” (o con sufijo de MB) ocupan menos memoria con una pérdida mínima de precisión. Las marcadas ⚡ Rápido (turbo) transcriben ≈6× más rápido con calidad casi idéntica.")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
+                            Text("⚠️ Las variantes fp16 de más de 1,5 GB (p. ej. la Large V3 de 3,2 GB) pueden NO cargar en el iPhone (falta de RAM/calor). Si no carga, usa una cuantizada o una turbo.")
+                                .font(.caption2)
+                                .foregroundColor(.orange)
                         }
                     }
                     .listStyle(.insetGrouped)
@@ -702,13 +705,14 @@ struct VariantSelectorSheet: View {
     private func loadVariants() async {
         do {
             // The service now returns any directory that is (or contains)
-            // a CoreML bundle, so `argmaxinc/whisperkit-coreml_*` repos
-            // (folders named like `openai_whisper-base`) show up too.
-            // For Qwen multi-component models, it returns quant dirs (f32/)
-            // or empty (root bundle with all components).
-            let files = try await HuggingFaceService.shared.listModelVariants(repoId: repo.modelId)
+            // a CoreML bundle, with the REAL total download size of each
+            // variant (Ronda 13), so the picker shows GB/MB and can warn
+            // about full-precision variants that are too heavy for the
+            // iPhone. For Qwen multi-component models it returns quant
+            // dirs (f32/) or empty (root bundle with all components).
+            let options = try await HuggingFaceService.shared.listModelVariantOptions(repoId: repo.modelId)
             await MainActor.run {
-                self.variants = files.sorted { $0.variantSortRank < $1.variantSortRank }
+                self.variants = options.sorted { $0.file.variantSortRank < $1.file.variantSortRank }
                 self.isLoading = false
             }
         } catch {
@@ -720,15 +724,18 @@ struct VariantSelectorSheet: View {
     }
     
     private func displayName(for path: String) -> String {
-        variants.first { $0.path == path }?.variantDisplayName ?? path
+        variants.first { $0.file.path == path }?.file.variantDisplayName ?? path
     }
 }
 
 struct VariantRow: View {
-    let variant: HFModelFile
+    let option: HuggingFaceService.ModelVariantOption
     let isSelected: Bool
     let onTap: () -> Void
-    
+
+    /// Backing HF tree entry (name/precision/badges live there).
+    private var variant: HFModelFile { option.file }
+
     var body: some View {
         Button(action: onTap) {
             HStack {
@@ -751,7 +758,10 @@ struct VariantRow: View {
         .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
     }
     
-    /// Subtitle with family, model size and quantization badge.
+    /// Subtitle with family, model size, real download size, quantization
+    /// badge and — for full-precision variants ≥ 1,5 GB — an explicit
+    /// “Pesado” warning (Ronda 13: the 3,2 GB fp16 large-v3 never finished
+    /// loading on iPhone; the picker now says so before the download).
     @ViewBuilder
     private var subtitle: some View {
         HStack(spacing: 6) {
@@ -766,6 +776,14 @@ struct VariantRow: View {
             if !variant.variantModelSize.isEmpty {
                 Text(variant.variantModelSize)
                     .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            // Real download size (sum of the variant subtree), computed
+            // from the same HF tree listing — shown for EVERY variant,
+            // including fp16 ones without a _NNNMB suffix.
+            if option.totalBytes > 0 {
+                Text(ByteCountFormatter.string(fromByteCount: option.totalBytes, countStyle: .file))
+                    .font(.caption2.weight(.semibold))
                     .foregroundColor(.secondary)
             }
             if variant.isTurboVariant {
@@ -797,6 +815,14 @@ struct VariantRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.orange.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+            if option.isHeavyForiPhone {
+                Text("⚠️ Pesado")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.22))
                     .clipShape(Capsule())
             }
             if variant.path.isEmpty {

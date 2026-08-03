@@ -288,7 +288,15 @@ final class BackgroundDownloadManager: NSObject {
     private func createTask(for relativePath: String, in batch: PendingBatch) {
         let safeRepo = HuggingFaceService.shared.sanitizePathComponent(batch.repoId)
         let safeFile = HuggingFaceService.shared.sanitizePathComponent(relativePath)
-        guard let url = URL(string: "https://huggingface.co/\(safeRepo)/resolve/main/\(safeFile)") else { return }
+        // Percent-encoded path via URLComponents: repo/folder names with
+        // spaces or special chars ("Whisper Large…") must not produce an
+        // invalid URL (URL(string:) would return nil and the task would be
+        // silently dropped, hanging the batch in .downloading forever).
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "huggingface.co"
+        components.percentEncodedPath = "/\(safeRepo)/resolve/main/\(safeFile)"
+        guard let url = components.url else { return }
         var request = URLRequest(url: url)
         if !HuggingFaceService.authToken.isEmpty {
             request.setValue("Bearer \(HuggingFaceService.authToken)", forHTTPHeaderField: "Authorization")
@@ -387,7 +395,11 @@ final class BackgroundDownloadManager: NSObject {
         }
         guard let path = task.originalRequest?.url?.path,
               let range = path.range(of: "/resolve/main/") else { return nil }
-        let relPath = String(path[range.upperBound...])
+        // URL paths arrive percent-encoded (spaces → %20); the persisted
+        // PendingFile paths are raw, so decode before comparing or the
+        // lookup misses and the completed file is never moved into place.
+        let encoded = String(path[range.upperBound...])
+        let relPath = encoded.removingPercentEncoding ?? encoded
         lock.lock()
         let batches = loadBatches()
         for batch in batches.values {

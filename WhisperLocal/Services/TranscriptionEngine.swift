@@ -140,8 +140,36 @@ final class TranscriptionEngine: ObservableObject {
             whisperProcessorLoaded = false
             loadedModelPath = nil
             print("[TranscriptionEngine] Fallo al cargar el modelo: \(error.localizedDescription)")
-            throw EngineError.modelLoadFailed(error.localizedDescription)
+            throw EngineError.modelLoadFailed(error.localizedDescription + Self.heavyModelHint(folderPath))
         }
+    }
+
+    /// Real size of a downloaded model folder (bytes on disk).
+    static func folderSizeBytes(at path: String) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(atPath: path) else { return 0 }
+        var total: Int64 = 0
+        while let entry = enumerator.nextObject() as? String {
+            let full = (path as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: full, isDirectory: &isDir),
+                  !isDir.boolValue,
+                  let attrs = try? FileManager.default.attributesOfItem(atPath: full),
+                  let size = attrs[.size] as? Int64 else { continue }
+            total += size
+        }
+        return total
+    }
+
+    /// When a model folder is very large (fp16 ≥ 1,5 GB on disk), a load
+    /// failure is usually a device-memory/ANE issue, not a corrupted
+    /// download — give the user an actionable next step instead of a
+    /// cryptic CoreML error (Ronda 13: the 3,2 GB fp16 large-v3 thrashed
+    /// and never finished loading on Raúl's iPhone).
+    static func heavyModelHint(_ folderPath: String) -> String {
+        let bytes = folderSizeBytes(at: folderPath)
+        guard bytes >= 1_500_000_000 else { return "" }
+        let sizeText = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        return "\n\nEste modelo ocupa \(sizeText) en disco y es demasiado pesado para cargarse en este iPhone (memoria/calor). Prueba con una variante cuantizada o turbo — p. ej. la Large V3 Turbo de 954 MB o la v20240930 — que cargan en segundos con calidad casi idéntica."
     }
 
     func unloadModel() {

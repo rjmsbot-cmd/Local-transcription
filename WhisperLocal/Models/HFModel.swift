@@ -207,6 +207,12 @@ struct HFModelFile: Identifiable, Codable, Hashable {
         else if lower.contains("large") { rank = 5 }
         else { rank = 50 }
         if lower.contains("distil-whisper") { rank += 20 }
+        // Turbo/distilled variants sort ahead of their plain siblings:
+        // they are ≈6× faster AND load far more reliably on iPhone memory
+        // (the fp16 large-v3 3,2 GB outranked and never finished loading on
+        // Raúl's device — Ronda 13). Applied before ×10 so a turbo small/med
+        // also floats above a plain larger sibling, which is what we want.
+        if lower.contains("turbo") || lower.contains("distil") { rank -= 1 }
         return rank * 10 + (precision == .quantized ? 1 : 0)
     }
     
