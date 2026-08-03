@@ -215,7 +215,7 @@ final class ModelManager: ObservableObject {
                 }
                 return nil
             }
-            availableModels = curated + classified?
+            availableModels = curated + classified
         } catch {
             errorMessage = error.localizedDescription
             availableModels = []
