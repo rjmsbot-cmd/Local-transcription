@@ -56,10 +56,20 @@ struct WhisperLocalApp: App {
 final class AppState: ObservableObject {
     @Published var isTranscribing = false
     @Published var transcriptionProgress: Double = 0
+    /// Phase text from the engine ("Leyendo audio…", "Transcribiendo…", …).
+    @Published var transcriptionPhase = ""
+    /// Live text streamed from the model while decoding (empty until the
+    /// first partial text arrives).
     @Published var currentPartialText = ""
     @Published var activeModelName: String?
     @Published var transcriptionElapsed: TimeInterval = 0
     @Published var transcriptionAudioDuration: TimeInterval = 0
+    /// Tokens decoded per second (from WhisperKit timings).
+    @Published var tokensPerSecond: Double = 0
+    /// Decoding speed vs real time (×) — same source as the ETA.
+    @Published var speedFactor: Double = 0
+    /// Audio window (0-based) currently being decoded.
+    @Published var currentWindowIndex = 0
     
     let audioProcessor = AudioProcessor()
     let transcriptionEngine = TranscriptionEngine()
@@ -69,11 +79,29 @@ final class AppState: ObservableObject {
         ModelManager(modelContext: context)
     }
     
+    /// Single entry point for progress events: both RecordView and
+    /// TranscribeView call this, so the real-time monitor always reflects
+    /// whichever tab started the transcription.
+    func updateTranscriptionProgress(_ progress: TranscriptionProgress) {
+        transcriptionProgress = progress.fraction
+        transcriptionPhase = progress.phase
+        currentPartialText = progress.partialText
+        transcriptionElapsed = progress.elapsed
+        transcriptionAudioDuration = progress.audioDuration
+        tokensPerSecond = progress.tokensPerSecond
+        speedFactor = progress.speedFactor
+        currentWindowIndex = progress.windowIndex
+    }
+    
     func resetProgress() {
         transcriptionProgress = 0
+        transcriptionPhase = ""
         currentPartialText = ""
         transcriptionElapsed = 0
         transcriptionAudioDuration = 0
+        tokensPerSecond = 0
+        speedFactor = 0
+        currentWindowIndex = 0
     }
     
     // MARK: - File protection (Security #3 / F7 fix)

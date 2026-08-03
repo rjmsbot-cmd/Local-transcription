@@ -106,7 +106,7 @@ actor WhisperProcessor {
         samples: [Float],
         language: String?,
         task: TranscriptionTask,
-        onProgress: @escaping @Sendable (Double, String) -> Void
+        onProgress: @escaping @Sendable (WhisperLocal.TranscriptionProgress) -> Void
     ) async throws -> WhisperResult {
         guard let whisperKit else { throw WhisperProcessorError.notLoaded }
 
@@ -116,24 +116,75 @@ actor WhisperProcessor {
         options.detectLanguage = (language == nil)
         options.wordTimestamps = true
 
-        onProgress(0.05, "Cargando modelo en el Neural Engine…")
+        let audioDuration = Double(samples.count) / 16000.0
+        let start = Date()
 
-        // NOTE on progress: WhisperKit's `callback` fires repeatedly while
-        // decoding, but the exact shape of `TranscriptionProgress` (field
-        // names such as window index, tokens/sec, etc.) has changed between
-        // WhisperKit releases — check the version actually resolved by
-        // Xcode (Quick Help on `TranscriptionProgress`) if you want to wire
-        // up a more granular bar than the two steps below.
+        /// Builds a local `TranscriptionProgress` (with elapsed already
+        /// measured against `start`) and hops to the main actor.
+        func emit(
+            _ fraction: Double,
+            _ phase: String,
+            wk: WhisperKit.TranscriptionProgress? = nil
+        ) {
+            let tps = wk?.timings.tokensPerSecond ?? 0
+            let speed = wk?.timings.speedFactor ?? 0
+            let local = WhisperLocal.TranscriptionProgress(
+                taskId: "transcribe",
+                fraction: fraction,
+                phase: phase,
+                elapsed: Date().timeIntervalSince(start),
+                audioDuration: audioDuration,
+                partialText: wk?.text ?? "",
+                tokensPerSecond: tps.isFinite ? tps : 0,
+                speedFactor: speed.isFinite ? speed : 0,
+                windowIndex: wk?.windowId ?? 0
+            )
+            Task { @MainActor in
+                onProgress(local)
+            }
+        }
+
+        emit(0.05, "Cargando modelo en el Neural Engine…")
+
+        // WhisperKit's `callback` fires repeatedly while decoding, on a
+        // background thread, and carries the live transcript + timings
+        // (`tokensPerSecond`, `speedFactor`, `windowId`). We forward all of
+        // it so the UI can show a real-time monitor (streaming text, tok/s,
+        // speed ×, ETA) instead of a coarse two-step bar.
         let results = try await whisperKit.transcribe(
             audioArray: samples,
             decodeOptions: options,
-            callback: { _ in
-                onProgress(0.5, "Transcribiendo…")
+            callback: { progress in
+                let tps = progress.timings.tokensPerSecond
+                let speed = progress.timings.speedFactor
+                // Continuous progress estimate: elapsed / expected total time
+                // (expected total = audio duration ÷ speed factor). Falls back
+                // to a fixed 0.5 while no decoding has started yet.
+                var fraction = 0.5
+                if speed > 0.01, audioDuration > 0 {
+                    let expectedTotal = audioDuration / speed
+                    fraction = min(0.95, max(0.05, Date().timeIntervalSince(start) / expectedTotal))
+                }
+                let phase = progress.text.isEmpty ? "Transcribiendo…" : "Generando texto…"
+                let local = WhisperLocal.TranscriptionProgress(
+                    taskId: "transcribe",
+                    fraction: fraction,
+                    phase: phase,
+                    elapsed: Date().timeIntervalSince(start),
+                    audioDuration: audioDuration,
+                    partialText: progress.text,
+                    tokensPerSecond: tps.isFinite ? tps : 0,
+                    speedFactor: speed.isFinite ? speed : 0,
+                    windowIndex: progress.windowId
+                )
+                Task { @MainActor in
+                    onProgress(local)
+                }
                 return true // returning false would cancel decoding early
             }
         )
 
-        onProgress(1.0, "Completado")
+        emit(1.0, "Completado")
 
         // A single call can return multiple chunk results when WhisperKit's
         // VAD-based chunking splits long audio into independently decoded

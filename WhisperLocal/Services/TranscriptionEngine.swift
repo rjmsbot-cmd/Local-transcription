@@ -153,21 +153,17 @@ final class TranscriptionEngine: ObservableObject {
             throw EngineError.transcriptionFailed("No se pudo leer el audio: \(error.localizedDescription)")
         }
 
-        let audioDuration = Double(samples.count) / 16000.0
-        let start = Date()
+        // WhisperProcessor computes elapsed/audioDuration/partialText/tok/s
+        // itself from the WhisperKit callback; the engine just forwards the
+        // richer progress straight to the UI (same as before, but now with
+        // the live stats the monitor needs).
         let whisperResult = try await processor.transcribe(
             samples: samples,
             language: language,
             task: task,
-            onProgress: { fraction, phase in
+            onProgress: { progress in
                 Task { @MainActor in
-                    progressHandler(TranscriptionProgress(
-                        taskId: "transcribe",
-                        fraction: fraction,
-                        phase: phase,
-                        elapsed: Date().timeIntervalSince(start),
-                        audioDuration: audioDuration
-                    ))
+                    progressHandler(progress)
                 }
             }
         )

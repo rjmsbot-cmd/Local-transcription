@@ -500,7 +500,7 @@ struct RecordView: View {
         VStack(spacing: 12) {
             ProgressView(value: appState.transcriptionProgress) {
                 HStack {
-                    Text(progressPhaseText)
+                    Text(appState.transcriptionPhase.isEmpty ? progressPhaseText : appState.transcriptionPhase)
                         .font(.subheadline.weight(.medium))
                     Spacer()
                     Text("\(Int(appState.transcriptionProgress * 100))%")
@@ -510,11 +510,22 @@ struct RecordView: View {
             .progressViewStyle(.linear)
             .tint(.blue)
             
+            if showLiveStats {
+                HStack(spacing: 14) {
+                    Label("\(tokensPerSecondLabel) tok/s", systemImage: "bolt.fill")
+                    Label(speedFactorLabel, systemImage: "gauge.with.dots.needle.50percent")
+                    Spacer()
+                    Label("Restante: ~\(remainingLabel)", systemImage: "timer")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            
             if !appState.currentPartialText.isEmpty {
                 Text(appState.currentPartialText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                    .lineLimit(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background(.regularMaterial)
@@ -530,6 +541,28 @@ struct RecordView: View {
         if appState.transcriptionProgress < 0.1 { return "Preparando..." }
         if appState.transcriptionProgress < 0.95 { return "Transcribiendo..." }
         return "Finalizando..." }
+    
+    private var showLiveStats: Bool {
+        appState.transcriptionElapsed >= 1 && appState.transcriptionProgress > 0.01
+    }
+    
+    private var tokensPerSecondLabel: String {
+        appState.tokensPerSecond > 0 ? String(format: "%.1f", appState.tokensPerSecond) : "—"
+    }
+    
+    private var speedFactorLabel: String {
+        appState.speedFactor > 0.01 ? String(format: "%.1f×", appState.speedFactor) : "—"
+    }
+    
+    private var remainingLabel: String {
+        let elapsed = appState.transcriptionElapsed
+        let duration = appState.transcriptionAudioDuration
+        let speed = appState.speedFactor
+        guard duration > 0, speed > 0.01, elapsed > 0 else { return "—" }
+        let processed = min(duration, elapsed * speed)
+        let remaining = max(0, duration - processed) / speed
+        return remaining > 0 ? ExportService.formatDuration(remaining) : "—"
+    }
     
     // MARK: - Result
     
@@ -666,8 +699,7 @@ struct RecordView: View {
                 language: selectedLanguage == "auto" ? nil : selectedLanguage,
                 task: selectedTask,
                 progressHandler: { progress in
-                    appState.transcriptionProgress = progress.fraction
-                    appState.currentPartialText = progress.phase
+                    appState.updateTranscriptionProgress(progress)
                 }
             )
             

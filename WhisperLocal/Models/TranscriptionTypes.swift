@@ -85,6 +85,14 @@ struct TranscriptionProgress {
     var elapsed: TimeInterval = 0
     /// Total audio duration in seconds (known once the file is decoded).
     var audioDuration: TimeInterval = 0
+    /// Live text decoded so far (streamed from WhisperKit's callback).
+    var partialText: String = ""
+    /// Tokens decoded per second (WhisperKit `timings.tokensPerSecond`).
+    var tokensPerSecond: Double = 0
+    /// How many times faster than real time the model is decoding (×).
+    var speedFactor: Double = 0
+    /// Index of the audio window currently being decoded (0-based).
+    var windowIndex: Int = 0
 }
 
 // MARK: - Transcription convenience init (for Views compatibility)

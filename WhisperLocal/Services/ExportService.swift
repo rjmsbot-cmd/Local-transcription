@@ -3,6 +3,36 @@ import Foundation
 /// Exports transcriptions to multiple file formats.
 struct ExportService {
     
+    /// Immutable, Sendable copy of everything the exporters need. Lets the
+    /// export run off the main thread without touching the SwiftData model
+    /// (models aren't Sendable). Capture it on the main thread, then hand it
+    /// to `Task.detached`.
+    struct ExportSnapshot: Sendable {
+        let title: String
+        let fullText: String
+        let segments: [TranscriptionSegment]
+        let duration: TimeInterval
+        let language: String
+        let modelName: String
+        let createdAt: Date
+        let format: ExportFormat
+        
+        init(transcription: Transcription, format: ExportFormat) {
+            self.title = transcription.title
+            self.fullText = transcription.fullText
+            self.segments = transcription.segments
+            self.duration = transcription.duration
+            self.language = transcription.detectedLanguage
+            self.modelName = transcription.modelName
+            self.createdAt = transcription.createdAt
+            self.format = format
+        }
+        
+        var wordCount: Int {
+            fullText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
+        }
+    }
+    
     enum ExportFormat: String, CaseIterable, Identifiable {
         case txt = "Plain Text"
         case srt = "SRT Subtitles"
@@ -48,19 +78,27 @@ struct ExportService {
     }
     
     static func export(_ transcription: Transcription, format: ExportFormat) throws -> Data {
-        switch format {
-        case .txt: return exportTXT(transcription)
-        case .srt: return exportSRT(transcription)
-        case .vtt: return exportVTT(transcription)
-        case .json: return exportJSON(transcription)
-        case .csv: return exportCSV(transcription)
-        case .md: return exportMarkdown(transcription)
+        try export(ExportSnapshot(transcription: transcription, format: format))
+    }
+    
+    static func export(_ snapshot: ExportSnapshot) throws -> Data {
+        switch snapshot.format {
+        case .txt: return exportTXT(snapshot)
+        case .srt: return exportSRT(snapshot)
+        case .vtt: return exportVTT(snapshot)
+        case .json: return exportJSON(snapshot)
+        case .csv: return exportCSV(snapshot)
+        case .md: return exportMarkdown(snapshot)
         }
     }
     
     static func exportToFile(_ transcription: Transcription, format: ExportFormat) throws -> URL {
-        let data = try export(transcription, format: format)
-        let fileName = "\(transcription.title.sanitizedForFilename).\(format.fileExtension)"
+        try exportToFile(ExportSnapshot(transcription: transcription, format: format))
+    }
+    
+    static func exportToFile(_ snapshot: ExportSnapshot) throws -> URL {
+        let data = try export(snapshot)
+        let fileName = "\(snapshot.title.sanitizedForFilename).\(snapshot.format.fileExtension)"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         try data.write(to: url)
         return url
@@ -68,7 +106,7 @@ struct ExportService {
     
     // MARK: - TXT
     
-    private static func exportTXT(_ t: Transcription) -> Data {
+    private static func exportTXT(_ t: ExportSnapshot) -> Data {
         var lines: [String] = []
         lines.append(t.title)
         lines.append(String(repeating: "=", count: t.title.count))
@@ -97,7 +135,7 @@ struct ExportService {
     
     // MARK: - SRT
     
-    private static func exportSRT(_ t: Transcription) -> Data {
+    private static func exportSRT(_ t: ExportSnapshot) -> Data {
         var srt = ""
         for (i, seg) in t.segments.enumerated() {
             srt += "\(i + 1)\n"
@@ -109,7 +147,7 @@ struct ExportService {
     
     // MARK: - VTT
     
-    private static func exportVTT(_ t: Transcription) -> Data {
+    private static func exportVTT(_ t: ExportSnapshot) -> Data {
         var vtt = "WEBVTT\n\n"
         for (i, seg) in t.segments.enumerated() {
             vtt += "\(i + 1)\n"
@@ -121,7 +159,7 @@ struct ExportService {
     
     // MARK: - JSON
     
-    private static func exportJSON(_ t: Transcription) -> Data {
+    private static func exportJSON(_ t: ExportSnapshot) -> Data {
         let output: [String: Any] = [
             "title": t.title,
             "created_at": ISO8601DateFormatter().string(from: t.createdAt),
@@ -145,7 +183,7 @@ struct ExportService {
     
     // MARK: - CSV
     
-    private static func exportCSV(_ t: Transcription) -> Data {
+    private static func exportCSV(_ t: ExportSnapshot) -> Data {
         var csv = "id,start_seconds,end_seconds,duration_seconds,text\n"
         for (i, seg) in t.segments.enumerated() {
             let escaped = seg.text.replacingOccurrences(of: "\"", with: "\"\"")
@@ -159,7 +197,7 @@ struct ExportService {
     
     // MARK: - Markdown
     
-    private static func exportMarkdown(_ t: Transcription) -> Data {
+    private static func exportMarkdown(_ t: ExportSnapshot) -> Data {
         var md = "# \(t.title)\n\n"
         md += "| | |\n|---|---|\n"
         md += "| **Duration** | \(formatDuration(t.duration)) |\n"

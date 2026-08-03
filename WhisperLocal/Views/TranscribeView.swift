@@ -16,6 +16,14 @@ enum TranscribeSheet: Identifiable {
     }
 }
 
+/// Real-time transcription monitor.
+///
+/// Transcribing is now started from the Record tab (recordings, voice memos,
+/// imported files), so this tab has been repurposed as a LIVE MONITOR:
+/// `AppState` is shared, therefore any transcription running anywhere in the
+/// app shows up here in real time — streaming text, tokens/s, speed ×, window
+/// and ETA. The old "pick audio → transcribe" flow is kept below as a
+/// fallback while nothing is running.
 struct TranscribeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
@@ -57,24 +65,25 @@ struct TranscribeView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     headerCard
-                    audioPickerCard
-                    
-                    if selectedAudioURL != nil {
-                        settingsCard
-                        startButton
-                    }
                     
                     if appState.isTranscribing {
-                        progressCard
-                    }
-                    
-                    if let result = transcriptionResult, !appState.isTranscribing {
+                        // Real-time monitor — shows whatever transcription is
+                        // running, regardless of which tab started it.
+                        liveMonitorCard
+                    } else if let result = transcriptionResult {
                         resultCard(result)
+                    } else {
+                        audioPickerCard
+                        
+                        if selectedAudioURL != nil {
+                            settingsCard
+                            startButton
+                        }
                     }
                 }
                 .padding()
             }
-            .navigationTitle("Whisper Local")
+            .navigationTitle("Monitor")
             .background(Color(.systemGroupedBackground))
             .onReceive(appState.transcriptionEngine.objectWillChange) { _ in
                 // Re-render when the model memory state changes (load/unload).
@@ -120,10 +129,10 @@ struct TranscribeView: View {
                     .foregroundStyle(.blue.gradient)
             }
             
-            Text("On-Device Transcription")
+            Text("Monitor de transcripción")
                 .font(.title3.weight(.semibold))
             
-            Text("100% local processing using Apple Neural Engine.\nNo data leaves your iPhone.")
+            Text("Todo lo que se transcriba en la app aparece aquí en tiempo real, con el rendimiento del modelo.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -168,6 +177,140 @@ struct TranscribeView: View {
         .frame(maxWidth: .infinity)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+    
+    // MARK: - Live Monitor
+    
+    private var liveMonitorCard: some View {
+        VStack(spacing: 14) {
+            // Monitor header
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.and.mic")
+                    .foregroundStyle(.blue)
+                Text("Monitor en tiempo real")
+                    .font(.headline)
+                Spacer()
+                if appState.transcriptionEngine.isLoadingModel {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 8, height: 8)
+                }
+            }
+            
+            // Live text — auto-scrolls as tokens arrive
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(appState.currentPartialText.isEmpty
+                         ? "Esperando texto del modelo…"
+                         : appState.currentPartialText)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .id("liveText")
+                }
+                .frame(maxHeight: 240)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .onChange(of: appState.currentPartialText) { _, _ in
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo("liveText", anchor: .bottom)
+                    }
+                }
+            }
+            
+            // Progress bar
+            ProgressView(value: appState.transcriptionProgress) {
+                HStack {
+                    Text(appState.transcriptionPhase.isEmpty ? "Transcribiendo…" : appState.transcriptionPhase)
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text("\(Int(appState.transcriptionProgress * 100))%")
+                        .font(.subheadline.monospacedDigit())
+                }
+            }
+            .progressViewStyle(.linear)
+            .tint(.blue)
+            
+            // Performance stats
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                monitorStat("Tokens/s", tokensLabel, icon: "bolt.fill")
+                monitorStat("Velocidad", speedLabel, icon: "gauge.with.dots.needle.50percent")
+                monitorStat("Ventana", windowLabel, icon: "rectangle.split.2x1")
+                monitorStat("Tiempo", elapsedLabel, icon: "clock")
+                monitorStat("Audio", ExportService.formatDuration(appState.transcriptionAudioDuration), icon: "music.note")
+                monitorStat("Restante", etaLabel, icon: "timer")
+            }
+            
+            // Model in use
+            HStack(spacing: 6) {
+                Image(systemName: "cpu.fill")
+                    .font(.caption2)
+                Text(appState.activeModelName ?? activeModel?.name ?? "—")
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.blue.opacity(0.1))
+            .clipShape(Capsule())
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+    
+    private func monitorStat(_ title: String, _ value: String, icon: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.blue)
+            Text(value)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+    
+    // MARK: - Live stats labels
+    
+    private var tokensLabel: String {
+        appState.tokensPerSecond > 0 ? String(format: "%.1f", appState.tokensPerSecond) : "—"
+    }
+    
+    private var speedLabel: String {
+        appState.speedFactor > 0.01 ? String(format: "%.1f×", appState.speedFactor) : "—"
+    }
+    
+    private var windowLabel: String {
+        appState.tokensPerSecond > 0 ? "\(appState.currentWindowIndex + 1)" : "—"
+    }
+    
+    private var elapsedLabel: String {
+        appState.transcriptionElapsed >= 1
+            ? ExportService.formatDuration(appState.transcriptionElapsed)
+            : "0s"
+    }
+    
+    private var etaLabel: String {
+        let elapsed = appState.transcriptionElapsed
+        let duration = appState.transcriptionAudioDuration
+        let speed = appState.speedFactor
+        guard duration > 0, speed > 0.01, elapsed > 0 else { return "—" }
+        let processed = min(duration, elapsed * speed)
+        let remaining = max(0, duration - processed) / speed
+        return remaining > 0 ? ExportService.formatDuration(remaining) : "—"
     }
     
     // MARK: - Audio Picker
@@ -360,78 +503,6 @@ struct TranscribeView: View {
         .disabled(activeModel == nil || appState.isTranscribing)
     }
     
-    // MARK: - Progress
-    
-    private var progressCard: some View {
-        VStack(spacing: 12) {
-            ProgressView(value: appState.transcriptionProgress) {
-                HStack {
-                    Text(progressPhaseText)
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text("\(Int(appState.transcriptionProgress * 100))%")
-                        .font(.subheadline.monospacedDigit())
-                }
-            }
-            .progressViewStyle(.linear)
-            .tint(.blue)
-            
-            if showSpeedMetrics {
-                HStack(spacing: 16) {
-                    Label("Velocidad: \(speedLabel)", systemImage: "gauge.with.dots.needle.50percent")
-                    Spacer()
-                    Label("Restante: ~\(etaLabel)", systemImage: "timer")
-                }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
-            
-            if !appState.currentPartialText.isEmpty {
-                Text(appState.currentPartialText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-        }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-    
-    private var progressPhaseText: String {
-        if appState.transcriptionProgress < 0.1 { return "Preparando…" }
-        if appState.transcriptionProgress < 0.95 { return "Transcribiendo…" }
-        return "Finalizando…"
-    }
-    
-    /// Real-time factor: 1× = as fast as real time, 2.5× = 2.5× faster.
-    private var showSpeedMetrics: Bool {
-        appState.transcriptionElapsed >= 1 && appState.transcriptionProgress > 0.01
-    }
-    
-    private var speedLabel: String {
-        let elapsed = appState.transcriptionElapsed
-        let fraction = appState.transcriptionProgress
-        let duration = appState.transcriptionAudioDuration
-        guard duration > 0, fraction > 0 else { return "—" }
-        let rtf = elapsed / (fraction * duration)
-        return rtf > 0 ? String(format: "%.1f×", 1.0 / rtf) : "—"
-    }
-    
-    private var etaLabel: String {
-        let elapsed = appState.transcriptionElapsed
-        let fraction = appState.transcriptionProgress
-        let duration = appState.transcriptionAudioDuration
-        guard duration > 0, fraction > 0, fraction < 1 else { return "—" }
-        let rtf = elapsed / (fraction * duration)
-        let eta = (1 - fraction) * duration * rtf
-        return ExportService.formatDuration(eta)
-    }
-    
     // MARK: - Result
     
     private func resultCard(_ result: TranscriptionResult) -> some View {
@@ -569,10 +640,7 @@ struct TranscribeView: View {
                 language: selectedLanguage == "auto" ? nil : selectedLanguage,
                 task: selectedTask,
                 progressHandler: { progress in
-                    appState.transcriptionProgress = progress.fraction
-                    appState.currentPartialText = progress.phase
-                    appState.transcriptionElapsed = progress.elapsed
-                    appState.transcriptionAudioDuration = progress.audioDuration
+                    appState.updateTranscriptionProgress(progress)
                 }
             )
             

@@ -24,6 +24,8 @@ struct HistoryView: View {
                     } description: {
                         Text("Your transcription history will appear here after you transcribe audio files.")
                     }
+                } else if filtered.isEmpty && !searchText.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
                 } else {
                     List {
                         ForEach(filtered) { t in
@@ -72,33 +74,47 @@ struct TranscriptionRow: View {
     let transcription: Transcription
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(transcription.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                Text(transcription.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text(transcription.title)
+                .font(.headline)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
             
             Text(transcription.fullText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
             
-            HStack(spacing: 10) {
-                Label(ExportService.formatDuration(transcription.duration), systemImage: "clock")
-                Label(transcription.detectedLanguage, systemImage: "globe")
-                Label(transcription.modelName, systemImage: "cpu")
-                Spacer()
-                Text("\(transcription.wordCount) words")
+            // Wrap-friendly chips: long model names / dates never overflow,
+            // they wrap onto the next line and truncate gracefully.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 6)], alignment: .leading, spacing: 6) {
+                rowChip(icon: "calendar", text: transcription.createdAt.formatted(date: .abbreviated, time: .shortened))
+                rowChip(icon: "clock", text: ExportService.formatDuration(transcription.duration))
+                rowChip(icon: "globe", text: transcription.detectedLanguage)
+                rowChip(icon: "cpu", text: transcription.modelName)
+                rowChip(icon: "text.word.spacing", text: "\(transcription.wordCount) words")
+                if !transcription.segments.isEmpty {
+                    rowChip(icon: "list.number", text: "\(transcription.segments.count) segments")
+                }
             }
-            .font(.caption)
-            .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
+    }
+    
+    private func rowChip(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption2)
+            Text(text)
+                .font(.caption2)
+                .lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(.systemGray6))
+        .clipShape(Capsule())
     }
 }
 
@@ -113,12 +129,16 @@ struct TranscriptionDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Metadata
-                HStack(spacing: 8) {
+                // Metadata — adaptive grid so long model names wrap instead
+                // of getting clipped by a fixed HStack of badges.
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
                     MetaBadge(icon: "clock", text: ExportService.formatDuration(transcription.duration))
                     MetaBadge(icon: "globe", text: transcription.detectedLanguage)
                     MetaBadge(icon: "cpu", text: transcription.modelName)
                     MetaBadge(icon: "text.word.spacing", text: "\(transcription.wordCount) words")
+                    if !transcription.segments.isEmpty {
+                        MetaBadge(icon: "list.number", text: "\(transcription.segments.count) segments")
+                    }
                 }
                 
                 // Full text
@@ -197,11 +217,14 @@ struct MetaBadge: View {
             Text(text)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
-        .padding(6)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
         .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

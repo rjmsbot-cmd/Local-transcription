@@ -8,8 +8,7 @@ struct ExportSheet: View {
     @State private var showShare = false
     @State private var exportError: String?
     @State private var showError = false
-    
-    private let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+    @State private var isExporting = false
     
     var body: some View {
         NavigationStack {
@@ -28,12 +27,23 @@ struct ExportSheet: View {
                 }
                 .padding(.top, 20)
                 
-                // Format Grid
-                LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(ExportService.ExportFormat.allCases) { format in
-                        FormatTile(format: format, isSelected: selectedFormat == format) {
-                            withAnimation(.snappy) { selectedFormat = format }
-                        }
+                // Format grid.
+                //
+                // FIX (cuelgue con .md): the old LazyVGrid + withAnimation(.snappy)
+                // combo could hang the sheet's layout pass on iOS 17 when a tile
+                // was tapped first (selecting .txt first "warmed up" the state,
+                // which is why .md only failed on the first tap). Plain non-lazy
+                // Grid + plain state assignment removes both ingredients.
+                Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+                    GridRow {
+                        FormatTile(format: .txt, isSelected: selectedFormat == .txt) { selectedFormat = .txt }
+                        FormatTile(format: .srt, isSelected: selectedFormat == .srt) { selectedFormat = .srt }
+                        FormatTile(format: .vtt, isSelected: selectedFormat == .vtt) { selectedFormat = .vtt }
+                    }
+                    GridRow {
+                        FormatTile(format: .json, isSelected: selectedFormat == .json) { selectedFormat = .json }
+                        FormatTile(format: .csv, isSelected: selectedFormat == .csv) { selectedFormat = .csv }
+                        FormatTile(format: .md, isSelected: selectedFormat == .md) { selectedFormat = .md }
                     }
                 }
                 .padding(.horizontal)
@@ -42,23 +52,33 @@ struct ExportSheet: View {
                 Text(selectedFormat.description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
+                    .frame(maxWidth: .infinity)
                 
                 Spacer()
                 
                 // Export Button
-                Button { exportAndShare() } label: {
-                    HStack {
-                        Image(systemName: "square.and.arrow.up")
-                        Text("Export as \(selectedFormat.fileExtension.uppercased())")
+                Button {
+                    exportAndShare()
+                } label: {
+                    HStack(spacing: 8) {
+                        if isExporting {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        Text(isExporting ? "Generando…" : "Export as \(selectedFormat.fileExtension.uppercased())")
                             .font(.headline)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(Color.blue)
+                    .background(isExporting ? Color.gray : Color.blue)
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
+                .disabled(isExporting)
                 .padding(.horizontal)
                 .padding(.bottom, 20)
             }
@@ -83,12 +103,25 @@ struct ExportSheet: View {
     }
     
     private func exportAndShare() {
-        do {
-            exportedURL = try ExportService.exportToFile(transcription, format: selectedFormat)
-            showShare = true
-        } catch {
-            exportError = error.localizedDescription
-            showError = true
+        guard !isExporting else { return }
+        isExporting = true
+        // Snapshot the SwiftData model on the main thread (models aren't
+        // Sendable), then build the file off-main so very large transcripts
+        // can't jank the sheet while the share sheet is presented.
+        let snapshot = ExportService.ExportSnapshot(transcription: transcription, format: selectedFormat)
+        Task {
+            do {
+                let url = try await Task.detached(priority: .userInitiated) {
+                    try ExportService.exportToFile(snapshot)
+                }.value
+                exportedURL = url
+                isExporting = false
+                showShare = true
+            } catch {
+                isExporting = false
+                exportError = error.localizedDescription
+                showError = true
+            }
         }
     }
 }
