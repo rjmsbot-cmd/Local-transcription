@@ -168,7 +168,7 @@ final class BackgroundDownloadManager: NSObject {
                 repoId: repoId,
                 variant: variant,
                 destinationDir: destinationDir.path,
-                files: files.map { PendingFile(path: $0.path, size: $0.size ?? 0, downloaded: false) }
+                files: files.map { PendingFile(path: $0.path, size: Int64($0.size ?? 0), downloaded: false) }
             )
         }
 

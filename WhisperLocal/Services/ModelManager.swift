@@ -89,7 +89,7 @@ final class ModelManager: ObservableObject {
     func retryDownload(_ model: DownloadedModel, context: ModelContext) async throws {
         guard let folder = model.fullPath else { throw HFError.notFound }
         model.status = .downloading
-        model.errorMessage = nil
+        model.errorMessage = ""
         try context.save()
         do {
             let allFiles = try await HuggingFaceService.shared.listAllFiles(
