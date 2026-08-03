@@ -15,6 +15,15 @@ final class ModelManager: ObservableObject {
     /// True once the user has run a search; drives whether the Models tab
     /// shows search results or the initial "Recomendados" list.
     @Published var hasSearched = false
+
+    /// Monotonic counter to discard stale search results: every search
+    /// bumps it; a search whose results arrive after a newer search started
+    /// (or after its Task was cancelled mid-request) sees a mismatched
+    /// generation and drops its output instead of clobbering the UI
+    /// (Ronda 14 — this race made the search look "broken" when typing
+    /// fast: a cancelled request's error/empty state overwrote the results
+    /// of the search the user actually saw).
+    private var searchGeneration = 0
     
     private let modelDirName = "WhisperModels"
     private let modelContext: ModelContext
@@ -153,11 +162,12 @@ final class ModelManager: ObservableObject {
     /// Known WhisperKit-CoreML repos that actually ship CoreML bundles
     /// (.mlmodelc) WhisperKit can load — curated so the search always
     /// surfaces installable options, regardless of HF's name-based search.
+    /// Only `argmaxinc/whisperkit-coreml` is currently public & ungated
+    /// (Ronda 14: nickmcdonald/openb3/LucasLarson return 401 — gated — so
+    /// they were removed instead of showing a green "compatible" badge and
+    /// then failing at download).
     static let curatedWhisperKitRepos = [
-        "argmaxinc/whisperkit-coreml",      // canonical (8M+ downloads)
-        "nickmcdonald/whisperkit-coreml",   // community quantized builds
-        "openb3/whisperkit-coreml",         // community builds
-        "LucasLarson/whisperkit-coreml"     // community builds
+        "argmaxinc/whisperkit-coreml"      // canonical (8M+ downloads)
     ]
 
     /// Builds an `HFRepoInfo` for a curated repo id (no extra network call).
@@ -186,6 +196,8 @@ final class ModelManager: ObservableObject {
     }
     
     func searchModels(query: String, coreMLOnly: Bool = true) async {
+        searchGeneration += 1
+        let generation = searchGeneration
         hasSearched = true
         isLoading = true
         errorMessage = nil
@@ -197,12 +209,16 @@ final class ModelManager: ObservableObject {
                 sort: "downloads",
                 direction: "-1"
             )
+            // A newer search superseded us while the network call was in
+            // flight: drop these results entirely (Ronda 14).
+            guard generation == searchGeneration else { return }
             // Every hit gets a compatibility signal from a cheap top-level
             // probe (cached 10 min), sorted installable-first. Repos that
             // WhisperKit cannot load (Qwen3-ASR, Parakeet, Nemotron...) are
             // ranked last and surfaced with a clear "not compatible" badge
             // instead of silently opening an empty variant picker.
             let classified = await HuggingFaceService.shared.classifySearchResults(results)
+            guard generation == searchGeneration else { return }
             // Ronda 12: HF search is by NAME, so "whisper large v3" never
             // returns argmaxinc/whisperkit-coreml (its name has none of those
             // tokens) — the one repo every Whisper user needs was invisible.
@@ -216,11 +232,24 @@ final class ModelManager: ObservableObject {
                 return nil
             }
             availableModels = curated + classified
+            isLoading = false
+        } catch is CancellationError {
+            // Task was cancelled (user kept typing / cleared the field):
+            // never surface "cancelled" as an error. A newer search owns
+            // the UI now.
+            guard generation == searchGeneration else { return }
+            availableModels = []
+            isLoading = false
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            guard generation == searchGeneration else { return }
+            availableModels = []
+            isLoading = false
         } catch {
+            guard generation == searchGeneration else { return }
             errorMessage = error.localizedDescription
             availableModels = []
+            isLoading = false
         }
-        isLoading = false
     }
     
     /// Back to the initial state: clears search results and shows the

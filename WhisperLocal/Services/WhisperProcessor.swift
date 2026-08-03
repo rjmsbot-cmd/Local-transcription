@@ -63,9 +63,30 @@ actor WhisperProcessor {
             whisperKit = try await WhisperKit(config)
             loadedModelFolder = folderPath
         } catch {
-            whisperKit = nil
-            loadedModelFolder = nil
-            throw WhisperProcessorError.loadFailed(error.localizedDescription)
+            // Ronda 14: fp16 large encoders (~1,3 GB) often fail to compile
+            // on the Neural Engine (ANE memory limit) — the load throws or
+            // hangs forever. Retry once with the GPU/CPU, which has far more
+            // memory, before giving up. Slower for the encoder, but it LOADS;
+            // the decoder stays on the ANE for fast autoregressive decoding.
+            print("[WhisperProcessor] Carga ANE falló (\(error.localizedDescription)); reintentando en CPU+GPU")
+            let gpuConfig = WhisperKitConfig(
+                modelFolder: folderPath,
+                computeOptions: ModelComputeOptions(
+                    audioEncoderCompute: .cpuAndGPU,
+                    textDecoderCompute: .cpuAndNeuralEngine
+                ),
+                verbose: false,
+                download: false
+            )
+            do {
+                whisperKit = try await WhisperKit(gpuConfig)
+                loadedModelFolder = folderPath
+                print("[WhisperProcessor] Modelo cargado en CPU+GPU (el ANE no pudo con el encoder)")
+            } catch {
+                whisperKit = nil
+                loadedModelFolder = nil
+                throw WhisperProcessorError.loadFailed(error.localizedDescription)
+            }
         }
     }
 

@@ -41,13 +41,16 @@ struct ModelsView: View {
     @State private var diskSpace: String = ""
     @State private var searchTask: Task<Void, Never>?
 
-    /// Featured recommendation: Whisper Large V3 Turbo v20240930 (1.64 GB)
-    /// — the middle ground Raúl asked for (Ronda 12): twice the quality
-    /// headroom of the 954 MB quantization, still turbo-fast (≈6×), and a
-    /// fraction of the 3.2 GB fp16 load that made the iPhone overheat and
-    /// never finish loading. Installed directly from the canonical
-    /// WhisperKit repo with one tap; the 954 MB and 3.2 GB variants stay
-    /// available in the variant picker.
+    /// Featured recommendation: Whisper Large V3 Turbo v20240930 CUANTIZADA
+    /// (632 MB) — Ronda 14. This is the largest variant that RELIABLY
+    /// loads on the iPhone: every fp16 variant (1,64 GB and 3,2 GB) uses
+    /// the same ~1,3 GB fp16 encoder, which saturates the Neural Engine's
+    /// memory on many iPhones and never finishes loading (overheating,
+    /// seen with the 3,2 GB in Ronda 11b and with the 1,64 GB in Ronda 14).
+    /// The quantized turbo is ≈6× faster than large-v3 with near-identical
+    /// quality. Installed directly from the canonical WhisperKit repo with
+    /// one tap; the fp16 variants stay available in the variant picker
+    /// (now marked "⚠️ Pesado", and loading retries on the GPU).
     private var featuredTurbo: HFRepoInfo {
         HFModel(
             id: "argmaxinc/whisperkit-coreml",
@@ -61,9 +64,12 @@ struct ModelsView: View {
         )
     }
 
+    /// Variant installed by the featured card (quantized v20240930 turbo).
+    private let featuredVariant = "openai_whisper-large-v3-v20240930_turbo_632MB"
+
     private var isFeaturedInstalled: Bool {
         manager?.downloadedModels.contains {
-            $0.name == featuredTurbo.modelId && $0.variant == "openai_whisper-large-v3-v20240930_turbo"
+            $0.name == featuredTurbo.modelId && $0.variant == featuredVariant
         } ?? false
     }
 
@@ -263,7 +269,7 @@ struct ModelsView: View {
                                     FeaturedModelRow(
                                         isInstalled: isFeaturedInstalled,
                                         onInstall: {
-                                            activeSheet = .download(featuredTurbo, "openai_whisper-large-v3-v20240930_turbo")
+                                            activeSheet = .download(featuredTurbo, featuredVariant)
                                         }
                                     )
                                 }
@@ -278,7 +284,7 @@ struct ModelsView: View {
                                 Text("Resultados (\(results.count))").font(.headline)
                             } footer: {
                                 if shouldSuggestFeatured {
-                                    Text("El buscador de Hugging Face no devuelve los repos «whisperkit-coreml» por nombre (no contienen “whisper large v3”), así que la app los añade siempre arriba — son los únicos que WhisperKit puede cargar. El Destacado instala el Large V3 Turbo v20240930 directamente.")
+                                    Text("El buscador de Hugging Face no devuelve los repos «whisperkit-coreml» por nombre (no contienen “whisper large v3”), así que la app los añade siempre arriba — son los únicos que WhisperKit puede cargar. El Destacado instala el Large V3 Turbo v20240930 cuantizado (632 MB), el más grande que carga de forma fiable en el iPhone.")
                                 }
                             }
                         } else if manager!.downloadedModels.isEmpty {
@@ -291,13 +297,13 @@ struct ModelsView: View {
                             FeaturedModelRow(
                                 isInstalled: isFeaturedInstalled,
                                 onInstall: {
-                                    activeSheet = .download(featuredTurbo, "openai_whisper-large-v3-v20240930_turbo")
+                                    activeSheet = .download(featuredTurbo, featuredVariant)
                                 }
                             )
                         } header: {
                             Text("Destacado · Instalación directa")
                         } footer: {
-                            Text("Whisper Large V3 Turbo v20240930 (1,6 GB): turbo ≈6× más rápido que large-v3, calidad intermedia — más fiable de cargar que el fp16 de 3,2 GB y con más margen de calidad que la cuantizada de 954 MB. Las otras variantes están en el selector.")
+                            Text("Whisper Large V3 Turbo v20240930 CUANTIZADO (632 MB): turbo ≈6× más rápido que large-v3 con calidad casi idéntica, y carga en segundos. Las variantes fp16 (1,64 GB y 3,2 GB) usan un encoder que satura la memoria del iPhone y la carga nunca termina — por eso el Destacado es la cuantizada. Las otras variantes están en el selector.")
                         }
                         if !manager!.recommendedModels.isEmpty {
                             Section("Recomendados (\(manager!.recommendedModels.count))") {
@@ -578,9 +584,11 @@ struct SearchResultRow: View {
     }
 }
 
-/// Single-tap install card for the featured turbo model (v20240930, 1.64 GB
-/// since Ronda 12 — the 3.2 GB fp16 never finished loading on iPhone and the
-/// 954 MB quantized one was too aggressive for Raúl's quality bar).
+/// Single-tap install card for the featured turbo model (v20240930
+/// CUANTIZADA, 632 MB since Ronda 14 — the 1,64 GB fp16 failed to load on
+/// Raúl's iPhone just like the 3,2 GB one: the fp16 encoder saturates the
+/// Neural Engine. The quantized version is ≈6× faster with near-identical
+/// quality and loads in seconds).
 struct FeaturedModelRow: View {
     let isInstalled: Bool
     let onInstall: () -> Void
@@ -593,7 +601,7 @@ struct FeaturedModelRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Whisper Large V3 Turbo")
                     .font(.headline)
-                Text("⚡ Rápido · v20240930 · ~1,6 GB")
+                Text("⚡ Rápido · v20240930 · 632 MB")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
