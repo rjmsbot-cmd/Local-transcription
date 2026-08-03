@@ -292,6 +292,59 @@ enum VariantPrecision: String {
     case unknown
 }
 
+/// Compatibility signal attached to every search result, computed by
+/// `HuggingFaceService.classifySearchResults` from a cheap top-level tree
+/// probe (plus tag heuristics) so the user sees — BEFORE tapping — whether
+/// a repo can actually be installed. This replaces the old design where
+/// compatibility was only discovered inside the variant picker, after an
+/// expensive full-recursive listing.
+///
+/// Priority order (used for sorting): compatible → likelyCompatible →
+/// unknown → authRequired → incompatible.
+enum ModelSearchStatus: String {
+    /// WhisperKit bundle confirmed: top-level Whisper naming
+    /// (openai_whisper-*, distil-whisper-*) or the three artifacts as a
+    /// root bundle. Tap opens the variant picker.
+    case compatible
+    /// CoreML-tagged ASR repo but not yet verified against the file tree.
+    /// Tap opens the variant picker (which does the real check).
+    case likelyCompatible
+    /// No usable signal (neither CoreML tag nor Whisper naming).
+    /// Tap opens the variant picker for a definitive check.
+    case unknown
+    /// Known non-Whisper architecture (Parakeet, Qwen3-ASR, Nemotron…).
+    /// Tap shows an explanation instead of an empty picker.
+    case incompatible
+    /// Gated/private repo — needs an HF token in Ajustes.
+    case authRequired
+
+    static func rank(_ s: ModelSearchStatus) -> Int {
+        switch s {
+        case .compatible: 0
+        case .likelyCompatible: 1
+        case .unknown: 2
+        case .authRequired: 3
+        case .incompatible: 4
+        }
+    }
+
+    var isBlocked: Bool {
+        switch self {
+        case .incompatible, .authRequired: true
+        default: false
+        }
+    }
+}
+
+/// One search hit: the repo plus its compatibility signal and, when known,
+/// how many WhisperKit variants its tree exposes.
+struct ModelSearchResult: Equatable, Identifiable {
+    let model: HFRepoInfo
+    var status: ModelSearchStatus
+
+    var id: String { model.id }
+}
+
 /// Legacy alias for compatibility with older code that references HFFileItem
 typealias HFFileItem = HFModelFile
 

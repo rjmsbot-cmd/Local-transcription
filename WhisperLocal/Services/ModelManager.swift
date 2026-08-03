@@ -5,8 +5,10 @@ import SwiftUI
 @MainActor
 final class ModelManager: ObservableObject {
     @Published var downloadedModels: [DownloadedModel] = []
-    @Published var availableModels: [HFRepoInfo] = []
-    @Published var recommendedModels: [HFRepoInfo] = []
+    /// Search hits with a per-repo compatibility signal (see
+    /// HuggingFaceService.classifySearchResults). Sorted installable-first.
+    @Published var availableModels: [ModelSearchResult] = []
+    @Published var recommendedModels: [ModelSearchResult] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var diskSpaceAvailable: String = ""
@@ -15,11 +17,36 @@ final class ModelManager: ObservableObject {
     @Published var hasSearched = false
     
     private let modelDirName = "WhisperModels"
-    
+    private let modelContext: ModelContext
+    private var batchCompletedObserver: NSObjectProtocol?
+
     init(modelContext: ModelContext) {
+        self.modelContext = modelContext
         loadLocalModels(context: modelContext)
         updateDiskSpace()
+        // A download that finished while the app was closed (background
+        // session) is picked up here: flip .downloading → .ready and
+        // re-arm anything still pending.
+        reconcileDownloads(context: modelContext)
+        // Also reconcile when a background batch completes while the app
+        // is open (e.g. the user closed the download sheet earlier).
+        batchCompletedObserver = NotificationCenter.default.addObserver(
+            forName: .modelBatchCompleted,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.reconcileDownloads(context: self.modelContext)
+            }
+        }
         Task { await loadRecommendations() }
+    }
+
+    deinit {
+        if let batchCompletedObserver {
+            NotificationCenter.default.removeObserver(batchCompletedObserver)
+        }
     }
     
     func updateDiskSpace() {
@@ -33,6 +60,64 @@ final class ModelManager: ObservableObject {
         downloadedModels = (try? context.fetch(desc)) ?? []
     }
     
+    /// Flips models that finished downloading in the background (while the
+    /// app was closed) from `.downloading` to `.ready`, and backfills the
+    /// tokenizer that the foreground path would have fetched. Called on
+    /// manager creation.
+    func reconcileDownloads(context: ModelContext) {
+        let completed = BackgroundDownloadManager.shared.consumeCompletedBatches()
+        guard !completed.isEmpty else { return }
+        for model in downloadedModels where model.status == .downloading {
+            guard completed.contains("\(model.name)#\(model.variant)") else { continue }
+            Task {
+                if let size = HuggingFaceService.tokenizerSize(from: model.variant.isEmpty ? model.name : model.variant),
+                   let folder = model.fullPath {
+                    try? await HuggingFaceService.shared.downloadTokenizerFiles(
+                        modelSize: size,
+                        destinationURL: folder,
+                        progress: { _, _ in }
+                    )
+                }
+                model.status = .ready
+                try? context.save()
+            }
+        }
+    }
+
+    /// Re-runs a failed download by re-enqueuing the persisted batch
+    /// (files already on disk are skipped). Used by the row's "Reintentar".
+    func retryDownload(_ model: DownloadedModel, context: ModelContext) async throws {
+        guard let folder = model.fullPath else { throw HFError.notFound }
+        model.status = .downloading
+        model.errorMessage = nil
+        try context.save()
+        do {
+            let allFiles = try await HuggingFaceService.shared.listAllFiles(
+                repoId: model.name,
+                path: model.variant
+            )
+            let fileItems = allFiles
+                .filter { !$0.isDirectory }
+                .filter { model.variant.isEmpty ? Self.isWhisperKitModelFile($0.path) : true }
+            let destinationDir = model.variant.isEmpty ? folder : folder.deletingLastPathComponent()
+            let total = try await BackgroundDownloadManager.shared.enqueueBatch(
+                repoId: model.name,
+                variant: model.variant,
+                destinationDir: destinationDir,
+                files: fileItems,
+                progress: nil
+            )
+            model.sizeBytes = total
+            model.status = .ready
+            try context.save()
+        } catch {
+            model.status = .failed
+            model.errorMessage = error.localizedDescription
+            try? context.save()
+            throw error
+        }
+    }
+
     func addLocalModel(
         name: String, author: String, variant: String,
         format: String, sizeBytes: Int64, relativePath: String,
@@ -77,9 +162,12 @@ final class ModelManager: ObservableObject {
                 sort: "downloads",
                 direction: "-1"
             )
-            // Round 6: never offer repos WhisperKit cannot load (Qwen3-ASR,
-            // Parakeet, Nemotron...). They download fine but fail at load.
-            availableModels = results.filter { !$0.isIncompatibleArchitecture }
+            // Every hit gets a compatibility signal from a cheap top-level
+            // probe (cached 10 min), sorted installable-first. Repos that
+            // WhisperKit cannot load (Qwen3-ASR, Parakeet, Nemotron...) are
+            // ranked last and surfaced with a clear "not compatible" badge
+            // instead of silently opening an empty variant picker.
+            availableModels = await HuggingFaceService.shared.classifySearchResults(results)
         } catch {
             errorMessage = error.localizedDescription
             availableModels = []
@@ -106,8 +194,10 @@ final class ModelManager: ObservableObject {
             let models = try await HuggingFaceService.shared.fetchRecommendedModels()
             // Round 6: keep only WhisperKit-loadable repos (the Hub's
             // top CoreML ASR downloads include Parakeet/Qwen/Nemotron,
-            // which WhisperKit 0.9.4 cannot load).
-            recommendedModels = models.filter { $0.isCoreML && !$0.isIncompatibleArchitecture }
+            // which WhisperKit 0.9.4 cannot load). Each hit gets the same
+            // compatibility signal as search results.
+            let filtered = models.filter { $0.isCoreML && !$0.isIncompatibleArchitecture }
+            recommendedModels = await HuggingFaceService.shared.classifySearchResults(filtered)
         } catch {
             if !hasSearched {
                 errorMessage = error.localizedDescription
@@ -189,15 +279,14 @@ final class ModelManager: ObservableObject {
             let totalBytes = fileItems.reduce(Int64(0)) { $0 + Int64($1.size ?? 0) }
             _ = try DiskSpace.ensureSpace(for: max(totalBytes + 50 * 1024 * 1024, 200 * 1024 * 1024))
             
-            // For Qwen multi-component models (variant="" or quant dir like
-            // "f32/"), we must download ALL files under that path to get
-            // the complete model (encoder + decoder + embedding).
-            // For WhisperKit variants, the variant folder already contains
-            // everything needed.
-            let downloadedBytes = try await HuggingFaceService.shared.downloadFiles(
+            // Background transfer: the batch survives app termination, so
+            // closing the app no longer kills a multi-GB download — and a
+            // model is only marked .ready when EVERY file is on disk.
+            let downloadedBytes = try await BackgroundDownloadManager.shared.enqueueBatch(
                 repoId: repo.modelId,
+                variant: variant,
+                destinationDir: localDir,
                 files: fileItems,
-                destinationURL: localDir,
                 progress: { fraction, phase in
                     progress?(fraction, phase)
                 }
@@ -213,7 +302,7 @@ final class ModelManager: ObservableObject {
             // For root-bundle repos the variant is empty; fall back to the
             // repo id to detect the model size.
             let sizeSource = variant.isEmpty ? repo.modelId : variant
-            if let size = Self.tokenizerSize(from: sizeSource) {
+            if let size = HuggingFaceService.tokenizerSize(from: sizeSource) {
                 try? await HuggingFaceService.shared.downloadTokenizerFiles(
                     modelSize: size,
                     destinationURL: modelFolder,
@@ -266,21 +355,5 @@ final class ModelManager: ObservableObject {
         return ["melspectrogram", "audioencoder", "textdecoder"].contains {
             lower.contains($0 + ".ml")
         }
-    }
-
-    /// Maps a variant folder name (e.g. `openai_whisper-base`,
-    /// `whisper-large-v3-turbo`) to the matching `openai/whisper-*` repo
-    /// suffix used for the tokenizer files.
-    static func tokenizerSize(from variant: String) -> String? {
-        let lower = variant.lowercased()
-        if lower.contains("large-v3-turbo") { return "large-v3-turbo" }
-        if lower.contains("large-v3") { return "large-v3" }
-        if lower.contains("large-v2") { return "large-v2" }
-        if lower.contains("large") { return "large" }
-        if lower.contains("medium") { return "medium" }
-        if lower.contains("small") { return "small" }
-        if lower.contains("base") { return "base" }
-        if lower.contains("tiny") { return "tiny" }
-        return nil
     }
 }

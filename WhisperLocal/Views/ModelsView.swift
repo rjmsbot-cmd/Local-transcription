@@ -21,6 +21,15 @@ enum ModelSheet: Identifiable {
     }
 }
 
+/// Alert shown when tapping a search result that cannot be installed
+/// (non-Whisper architecture or gated repo). Explains WHY instead of
+/// opening an empty variant picker.
+struct ModelBlockAlert: Identifiable {
+    let id = UUID()
+    let repo: HFRepoInfo
+    let status: ModelSearchStatus
+}
+
 struct ModelsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
@@ -28,6 +37,7 @@ struct ModelsView: View {
     @State private var searchQuery = ""
     @State private var coremlOnly = true // F5: filter toggle for CoreML-compatible models
     @State private var activeSheet: ModelSheet?
+    @State private var blocking: ModelBlockAlert?
     @State private var diskSpace: String = ""
     @State private var searchTask: Task<Void, Never>?
 
@@ -51,6 +61,28 @@ struct ModelsView: View {
         manager?.downloadedModels.contains {
             $0.name == featuredTurbo.modelId && $0.variant == "openai_whisper-large-v3_turbo"
         } ?? false
+    }
+
+    /// While searching, the featured card is hidden by the results branch.
+    /// If the query clearly targets the turbo model (the repo name itself
+    /// does NOT contain "large/turbo/v3", so plain HF search misses it),
+    /// surface the direct-install card at the top of the results.
+    private var shouldSuggestFeatured: Bool {
+        guard !isFeaturedInstalled else { return false }
+        let q = searchQuery.lowercased()
+        return ["whisper", "turbo", "large", "v3", "coreml", "argmax", "rápido", "rapido"].contains { q.contains($0) }
+    }
+
+    /// Routes a tap on a search result: installable candidates open the
+    /// variant picker; blocked ones explain themselves instead of showing
+    /// an empty picker after a slow full-tree listing.
+    private func openResult(_ result: ModelSearchResult) {
+        switch result.status {
+        case .incompatible, .authRequired:
+            blocking = ModelBlockAlert(repo: result.model, status: result.status)
+        case .compatible, .likelyCompatible, .unknown:
+            activeSheet = .variantPicker(result.model)
+        }
     }
     
     var body: some View {
@@ -95,6 +127,28 @@ struct ModelsView: View {
                 )
             }
         }
+        .alert(item: $blocking) { alert in
+            switch alert.status {
+            case .incompatible:
+                return Alert(
+                    title: Text("Modelo no compatible"),
+                    message: Text("«\(alert.repo.displayName)» no se puede cargar con WhisperKit: usa otra arquitectura (Qwen3-ASR, Parakeet, Nemotron…).\n\nSolo funcionan los modelos Whisper con AudioEncoder, TextDecoder y MelSpectrogram en CoreML."),
+                    dismissButton: .default(Text("Entendido"))
+                )
+            case .authRequired:
+                return Alert(
+                    title: Text("Requiere autenticación"),
+                    message: Text("«\(alert.repo.displayName)» es un repositorio con acceso restringido.\n\nAñade un token de Hugging Face en Ajustes para poder descargarlo."),
+                    dismissButton: .default(Text("Entendido"))
+                )
+            default:
+                return Alert(
+                    title: Text("No disponible"),
+                    message: Text("Este repositorio no puede instalarse en la app."),
+                    dismissButton: .default(Text("Entendido"))
+                )
+            }
+        }
     }
     
     private var contentView: some View {
@@ -105,12 +159,26 @@ struct ModelsView: View {
                     .textFieldStyle(.plain)
                     .submitLabel(.search)
                     .onSubmit { performSearch() }
+                    .onChange(of: searchQuery) { _, newValue in
+                        searchTask?.cancel()
+                        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                        if trimmed.isEmpty {
+                            manager?.resetSearch()
+                            Task { await manager?.loadRecommendations() }
+                        } else {
+                            // Debounce: wait for a typing pause before
+                            // hitting the Hub (600 ms).
+                            searchTask = Task {
+                                try? await Task.sleep(nanoseconds: 600_000_000)
+                                guard !Task.isCancelled else { return }
+                                await manager?.searchModels(query: trimmed, coreMLOnly: coremlOnly)
+                            }
+                        }
+                    }
                 if !searchQuery.isEmpty {
                     Button {
-                        searchQuery = ""
                         searchTask?.cancel()
-                        manager?.resetSearch()
-                        Task { await manager?.loadRecommendations() }
+                        searchQuery = ""
                     } label: { Image(systemName: "xmark.circle.fill") }
                 }
             }
@@ -119,17 +187,24 @@ struct ModelsView: View {
             .cornerRadius(10)
             .padding(.horizontal)
             
-            // F5: CoreML compatibility filter toggle
+            // F5: WhisperKit-only search toggle. OFF widens the query to
+            // all ASR repos (classified and ranked last when incompatible).
             HStack {
                 Toggle(isOn: $coremlOnly) {
-                    Text("Solo CoreML")
+                    Text("Solo WhisperKit (CoreML)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 .toggleStyle(.switch)
+                .onChange(of: coremlOnly) { _, _ in
+                    guard manager?.hasSearched == true,
+                          !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                    searchTask?.cancel()
+                    searchTask = Task { await manager?.searchModels(query: searchQuery, coreMLOnly: coremlOnly) }
+                }
                 Spacer()
                 if !coremlOnly {
-                    Text("Mostrando todos los modelos")
+                    Text("Incluye otras arquitecturas (se marcan como no compatibles)")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -147,7 +222,7 @@ struct ModelsView: View {
             .padding(.top, 4)
             
             if manager!.isLoading {
-                ProgressView(manager!.hasSearched ? "Buscando…" : "Cargando recomendados…")
+                ProgressView(manager!.hasSearched ? "Buscando y verificando compatibilidad…" : "Cargando recomendados…")
                     .frame(height: 100)
             } else if let error = manager!.errorMessage {
                 ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -171,13 +246,29 @@ struct ModelsView: View {
                         }
                     }
                     if manager!.hasSearched {
-                        let filtered = coremlOnly ? manager!.availableModels.filter({ $0.isCoreML }) : manager!.availableModels
-                        if !filtered.isEmpty {
-                            Section("Resultados (\(filtered.count))") {
-                                ForEach(filtered) { repo in
-                                    SearchResultRow(repo: repo) {
-                                        activeSheet = .variantPicker(repo)
-                                    }
+                        let results = manager!.availableModels
+                        if !results.isEmpty {
+                            Section {
+                                if shouldSuggestFeatured {
+                                    FeaturedModelRow(
+                                        isInstalled: isFeaturedInstalled,
+                                        onInstall: {
+                                            activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo")
+                                        }
+                                    )
+                                }
+                                ForEach(results) { result in
+                                    SearchResultRow(
+                                        repo: result.model,
+                                        status: result.status,
+                                        onDownload: { openResult(result) }
+                                    )
+                                }
+                            } header: {
+                                Text("Resultados (\(results.count))").font(.headline)
+                            } footer: {
+                                if shouldSuggestFeatured {
+                                    Text("La búsqueda no encuentra el repo por nombre (no contiene “large/turbo/v3”), así que Whisper Large V3 Turbo aparece aquí con instalación directa.")
                                 }
                             }
                         } else if manager!.downloadedModels.isEmpty {
@@ -205,10 +296,12 @@ struct ModelsView: View {
                         }
                         if !manager!.recommendedModels.isEmpty {
                             Section("Recomendados (\(manager!.recommendedModels.count))") {
-                                ForEach(manager!.recommendedModels) { repo in
-                                    SearchResultRow(repo: repo) {
-                                        activeSheet = .variantPicker(repo)
-                                    }
+                                ForEach(manager!.recommendedModels) { result in
+                                    SearchResultRow(
+                                        repo: result.model,
+                                        status: result.status,
+                                        onDownload: { openResult(result) }
+                                    )
                                 }
                             }
                         } else if manager!.downloadedModels.isEmpty {
@@ -267,7 +360,31 @@ struct ModelRow: View {
                 }
             }
             Spacer()
-            if model.status == .ready {
+            if model.status == .downloading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Descargando en 2º plano…")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            } else if model.status == .failed {
+                Button {
+                    Task {
+                        do {
+                            try await manager.retryDownload(model, context: modelContext)
+                        } catch {
+                            loadErrorMessage = error.localizedDescription
+                            showLoadError = true
+                        }
+                    }
+                } label: {
+                    Label("Reintentar", systemImage: "arrow.clockwise.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(.plain)
+            } else if model.status == .ready {
                 if model.isWhisperKitCompatibleFolder {
                     HStack(spacing: 8) {
                         if isModelLoaded {
@@ -370,7 +487,9 @@ struct ModelRow: View {
 
 struct SearchResultRow: View {
     let repo: HFRepoInfo
+    let status: ModelSearchStatus
     let onDownload: () -> Void
+
     var body: some View {
         Button(action: onDownload) {
             HStack {
@@ -381,13 +500,51 @@ struct SearchResultRow: View {
                         if let l = repo.likes { Label("\(l)", systemImage: "heart").font(.caption) }
                         if repo.isCoreML { TagLabel(title: "CoreML", value: "✓") }
                     }
+                    statusBadge
                 }
                 Spacer()
-                Image(systemName: "arrow.down.circle").foregroundColor(.blue)
+                Image(systemName: status.isBlocked ? "xmark.circle" : "arrow.down.circle")
+                    .foregroundColor(status.isBlocked ? .red : .blue)
             }
             .padding(.vertical, 4)
+            .opacity(status.isBlocked ? 0.55 : 1)
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private var statusBadge: some View {
+        switch status {
+        case .compatible:
+            Label("Descargable", systemImage: "checkmark.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.green.opacity(0.15))
+                .clipShape(Capsule())
+        case .likelyCompatible:
+            Label("Compatible (por verificar)", systemImage: "questionmark.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.gray.opacity(0.16))
+                .clipShape(Capsule())
+        case .unknown:
+            Label("Sin señal CoreML", systemImage: "questionmark.circle")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.gray.opacity(0.12))
+                .clipShape(Capsule())
+        case .incompatible:
+            Label("No compatible", systemImage: "xmark.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.red.opacity(0.15))
+                .clipShape(Capsule())
+        case .authRequired:
+            Label("Requiere token", systemImage: "lock.fill")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.orange.opacity(0.18))
+                .clipShape(Capsule())
+        }
     }
 }
 
@@ -655,9 +812,13 @@ struct DownloadSheet: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
+                Text("Puedes cerrar la app: la descarga continúa en segundo plano y el modelo quedará listo.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
             }
             
-            Button(isPresented ? "Cancelar" : "Cerrar") { isPresented = false }
+            Button("Cerrar (continúa en 2º plano)") { isPresented = false }
                 .buttonStyle(.borderedProminent)
         }
         .padding()

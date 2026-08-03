@@ -4,7 +4,15 @@ import LocalAuthentication
 
 @main
 struct WhisperLocalApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
+
+    init() {
+        // Instantiates the background downloader: registers the
+        // BGProcessingTask and re-arms any download that was in flight
+        // when the app last closed.
+        _ = BackgroundDownloadManager.shared
+    }
     
     /// Shared model container with a crash-safe fallback.
     ///

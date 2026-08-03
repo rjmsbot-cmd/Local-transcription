@@ -191,6 +191,110 @@ final class HuggingFaceService {
         return try HFError.decodeOrThrow([HFModel].self, from: data, context: "recomendados")
     }
     
+    // MARK: - Search result classification (signal per repo)
+
+    /// Cache of the last classification per repo id, with TTL, so repeated
+    /// searches never re-probe the same repos.
+    private var searchStatusCache: [String: (status: ModelSearchStatus, date: Date)] = [:]
+    private let searchStatusCacheTTL: TimeInterval = 600 // 10 minutes
+
+    /// True when a top-level entry uses the canonical WhisperKit folder
+    /// naming (`openai_whisper-base`, `distil-whisper_distil-large-v3`…).
+    /// This is the strongest cheap signal that a repo has installable
+    /// WhisperKit variants.
+    static func isWhisperNamedDir(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        return lower.hasPrefix("openai_whisper")
+            || lower.hasPrefix("distil_whisper")
+            || lower.hasPrefix("distil-whisper")
+            || lower.contains("whisperkit")
+    }
+
+    /// Classifies a batch of search results with a cheap top-level tree
+    /// probe per repo (bounded concurrency + cache), then sorts them by
+    /// usability: installable first, known-bad last. Each probe is one
+    /// lightweight non-recursive tree call, so a 20-hit search costs at
+    /// most 20 small requests instead of one full recursive listing per
+    /// repo.
+    func classifySearchResults(_ models: [HFModel]) async -> [ModelSearchResult] {
+        guard !models.isEmpty else { return [] }
+        var results = models.map { ModelSearchResult(model: $0, status: .unknown) }
+
+        let semaphore = DispatchSemaphore(value: concurrencyLimit)
+        await withTaskGroup(of: (Int, ModelSearchStatus).self) { group in
+            for (index, model) in models.enumerated() {
+                group.addTask {
+                    semaphore.wait()
+                    defer { semaphore.signal() }
+                    let status = await self.classifyModel(model)
+                    return (index, status)
+                }
+            }
+            for await (index, status) in group {
+                results[index].status = status
+            }
+        }
+
+        // Installable first; within the same status, most-downloaded first.
+        return results.sorted {
+            let a = ModelSearchStatus.rank($0.status)
+            let b = ModelSearchStatus.rank($1.status)
+            if a != b { return a < b }
+            return ($0.model.downloads ?? 0) > ($1.model.downloads ?? 0)
+        }
+    }
+
+    /// Classifies one repo using: (1) known non-Whisper architecture
+    /// keywords — free, no network; (2) a top-level tree probe — one cheap
+    /// call; (3) CoreML tag / ASR pipeline heuristics when the probe is
+    /// inconclusive. 401/403 from the probe marks the repo as gated.
+    private func classifyModel(_ model: HFModel) async -> ModelSearchStatus {
+        let repoId = model.modelId
+        if let cached = searchStatusCache[repoId],
+           Date().timeIntervalSince(cached.date) < searchStatusCacheTTL {
+            return cached.status
+        }
+
+        // (1) Known non-Whisper architectures — reject without any request.
+        let lowerRepo = repoId.lowercased()
+        if Self.incompatibleArchitectureKeywords.contains(where: { lowerRepo.contains($0) }) {
+            cache(repoId, .incompatible)
+            return .incompatible
+        }
+
+        // (2) Top-level probe.
+        do {
+            let top = try await listFiles(repoId: repoId, recursive: false)
+            let hasWhisperNaming = top.contains { Self.isWhisperNamedDir($0.path) }
+            let isRootBundle = Self.whisperKitComponents.allSatisfy { component in
+                top.contains { $0.path.contains(component) && $0.isCoreMLBundleName }
+            }
+            if hasWhisperNaming || isRootBundle {
+                cache(repoId, .compatible)
+                return .compatible
+            }
+        } catch HFError.authRequired {
+            cache(repoId, .authRequired)
+            return .authRequired
+        } catch {
+            // Network/decoding failure: the probe is inconclusive, fall
+            // through to the tag heuristics so the repo is still listed
+            // (the variant picker will retry the real check on tap).
+        }
+
+        // (3) Tag heuristics.
+        let tags = model.tags?.map { $0.lowercased() } ?? []
+        let hasCoreMLTag = tags.contains { $0.contains("coreml") || $0.contains("core-ml") }
+        let isASR = (model.pipelineTag ?? "").lowercased().contains("speech-recognition")
+        let status: ModelSearchStatus = (hasCoreMLTag && isASR) ? .likelyCompatible : (hasCoreMLTag ? .likelyCompatible : .unknown)
+        cache(repoId, status)
+        return status
+    }
+
+    private func cache(_ repoId: String, _ status: ModelSearchStatus) {
+        searchStatusCache[repoId] = (status, Date())
+    }
+
     // MARK: - Compatibility check (with caching)
     
     func hasCompatibleFiles(repoId: String, forceRefresh: Bool = false) async throws -> Bool {
@@ -541,7 +645,24 @@ final class HuggingFaceService {
     }
     
     // MARK: - Tokenizer download
-    
+
+    /// Maps a variant folder name (e.g. `openai_whisper-base`,
+    /// `whisper-large-v3-turbo`, `Whisper-Large-v3-Turbo-CoreML`) to the
+    /// matching `openai/whisper-*` repo suffix used for the tokenizer
+    /// files.
+    static func tokenizerSize(from variant: String) -> String? {
+        let lower = variant.lowercased()
+        if lower.contains("large-v3-turbo") { return "large-v3-turbo" }
+        if lower.contains("large-v3") { return "large-v3" }
+        if lower.contains("large-v2") { return "large-v2" }
+        if lower.contains("large") { return "large" }
+        if lower.contains("medium") { return "medium" }
+        if lower.contains("small") { return "small" }
+        if lower.contains("base") { return "base" }
+        if lower.contains("tiny") { return "tiny" }
+        return nil
+    }
+
     /// Downloads the tokenizer files (tokenizer.json, vocab.json, merges.txt,
     /// …) for a Whisper model size from the matching `openai/whisper-*` repo
     /// into `destinationURL`.

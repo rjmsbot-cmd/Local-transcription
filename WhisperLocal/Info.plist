@@ -24,6 +24,14 @@
 	<string>Whisper Local usa Face ID para proteger el acceso a tus transcripciones y grabaciones.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Se necesita acceso al micrófono para grabar audio</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.rjmsbot.WhisperLocal.modelDownload</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

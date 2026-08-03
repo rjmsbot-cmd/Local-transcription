@@ -95,6 +95,19 @@ final class TranscriptionEngine: ObservableObject {
             loadingModelPath = nil
         }
 
+        // Backfill the tokenizer if it is missing (downloads that predate
+        // the tokenizer step, or that were interrupted before it):
+        // WhisperKit refuses to load without tokenizer.json in the model
+        // folder and would otherwise fail with a cryptic error.
+        if !FileManager.default.fileExists(atPath: folderPath + "/tokenizer.json"),
+           let size = HuggingFaceService.tokenizerSize(from: (folderPath as NSString).lastPathComponent) {
+            try? await HuggingFaceService.shared.downloadTokenizerFiles(
+                modelSize: size,
+                destinationURL: URL(fileURLWithPath: folderPath),
+                progress: { _, _ in }
+            )
+        }
+
         do {
             try await processor.loadModel(folderPath: folderPath)
             // A newer load/unload superseded us while we were loading; don't

@@ -30,6 +30,8 @@
 		B1000015 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500002; };
 		B1000016 /* DocumentPickerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9500004; };
 		B1000017 /* BiometricLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017; };
+		B100001C /* BackgroundDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001B; };
+		B100001D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001C; };
 		B1000018 /* DocumentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018; };
 		B1000019 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000011; };
 		B100001A /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019; };
@@ -84,6 +86,8 @@
 		A2000012 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000016 /* DiskSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/DiskSpace.swift; sourceTree = "<group>"; };
 		A2000017 /* BiometricLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricLock.swift; sourceTree = "<group>"; };
+		A200001B /* BackgroundDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadManager.swift; sourceTree = "<group>"; };
+		A200001C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A2000018 /* DocumentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerSheet.swift; sourceTree = "<group>"; };
 		A2000019 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
 		A200001A /* PerformanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceSettings.swift; sourceTree = "<group>"; };
@@ -173,6 +177,8 @@
 				A2000013 /* WhisperProcessor.swift */,
 				A2000014 /* RecordingService.swift */,
 				A2000017 /* BiometricLock.swift */,
+				A200001B /* BackgroundDownloadManager.swift */,
+				A200001C /* AppDelegate.swift */,
 				A2000018 /* DocumentPickerSheet.swift */,
 				A2000019 /* InboxStore.swift */,
 				A200001A /* PerformanceSettings.swift */,
@@ -316,6 +322,8 @@
 				B1000015 /* TranscriptionTypes.swift in Sources */,
 				B1000016 /* DocumentPickerService.swift in Sources */,
 				B1000017 /* BiometricLock.swift in Sources */,
+				B100001C /* BackgroundDownloadManager.swift in Sources */,
+				B100001D /* AppDelegate.swift in Sources */,
 				B1000018 /* DocumentPickerSheet.swift in Sources */,
 				B100001A /* InboxStore.swift in Sources */,
 				B100001B /* PerformanceSettings.swift in Sources */,
