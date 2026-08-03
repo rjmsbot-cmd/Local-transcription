@@ -13,11 +13,19 @@ import Foundation
 enum PerformanceSettings {
 
     /// "Máxima velocidad" — use every available CPU core for chunk decoding.
-    /// Default off because it is a trade-off: it dedicates more resources,
-    /// but can regress on ANE-bound workloads. Backed by UserDefaults so the
-    /// Settings toggle reads/writes the same value.
+    /// Default ON (Ronda 11): on modern iPhones the extra CPU parallelism
+    /// outweighs the ANE serialization, and it made the 47-min audio finish
+    /// in ~3 min. Backed by UserDefaults; the toggle in Settings can still
+    /// turn it off, and the stored value persists across launches.
     static var maxSpeedMode: Bool {
-        get { UserDefaults.standard.bool(forKey: PerformanceSettings.maxSpeedModeKey) }
+        get {
+            // Not set yet → default ON (instead of `bool(forKey:)` which
+            // would return false for an unset key).
+            guard UserDefaults.standard.object(forKey: PerformanceSettings.maxSpeedModeKey) != nil else {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: PerformanceSettings.maxSpeedModeKey)
+        }
         set { UserDefaults.standard.set(newValue, forKey: PerformanceSettings.maxSpeedModeKey) }
     }
 

@@ -41,9 +41,13 @@ struct ModelsView: View {
     @State private var diskSpace: String = ""
     @State private var searchTask: Task<Void, Never>?
 
-    /// Featured recommendation: Whisper Large V3 Turbo at FULL precision
-    /// (fp16, no size suffix = not quantized), installed directly from the
-    /// canonical WhisperKit repo with one tap — no variant browsing.
+    /// Featured recommendation: Whisper Large V3 Turbo QUANTIZED (954 MB),
+    /// installed directly from the canonical WhisperKit repo with one tap.
+    /// Ronda 11: the full-precision fp16 variant (3.2 GB) made iPhones sit
+    /// on "cargando" for minutes (memory/ANE pressure, device heats up and
+    /// the load never completes). The 954 MB quantization is ~6× faster than
+    /// large-v3, loads in seconds and is nearly identical in quality — the
+    /// fp16 stays available in the variant picker for anyone who wants it.
     private var featuredTurbo: HFRepoInfo {
         HFModel(
             id: "argmaxinc/whisperkit-coreml",
@@ -59,7 +63,7 @@ struct ModelsView: View {
 
     private var isFeaturedInstalled: Bool {
         manager?.downloadedModels.contains {
-            $0.name == featuredTurbo.modelId && $0.variant == "openai_whisper-large-v3_turbo"
+            $0.name == featuredTurbo.modelId && $0.variant == "openai_whisper-large-v3_turbo_954MB"
         } ?? false
     }
 
@@ -253,7 +257,7 @@ struct ModelsView: View {
                                     FeaturedModelRow(
                                         isInstalled: isFeaturedInstalled,
                                         onInstall: {
-                                            activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo")
+                                            activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo_954MB")
                                         }
                                     )
                                 }
@@ -286,13 +290,13 @@ struct ModelsView: View {
                             FeaturedModelRow(
                                 isInstalled: isFeaturedInstalled,
                                 onInstall: {
-                                    activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo")
+                                    activeSheet = .download(featuredTurbo, "openai_whisper-large-v3_turbo_954MB")
                                 }
                             )
                         } header: {
                             Text("Destacado · Instalación directa")
                         } footer: {
-                            Text("Whisper Large V3 Turbo en precisión completa (fp16): la calidad de large-v3 con ≈6× más velocidad. Ocupa 3,2 GB y aprovecha al máximo el Neural Engine. La versión cuantizada (954 MB) está en el selector de variantes.")
+                            Text("Whisper Large V3 Turbo cuantizada (954 MB): la calidad de large-v3 con ≈6× más velocidad, carga en segundos y sin calentar el móvil. La versión de precisión completa (3,2 GB) está en el selector de variantes si la quieres probar.")
                         }
                         if !manager!.recommendedModels.isEmpty {
                             Section("Recomendados (\(manager!.recommendedModels.count))") {
@@ -553,7 +557,9 @@ struct SearchResultRow: View {
     }
 }
 
-/// Single-tap install card for the featured full-precision turbo model.
+/// Single-tap install card for the featured turbo model (954 MB quantized
+/// since Ronda 11 — the fp16 full-precision variant kept iPhones stuck on
+/// "cargando" and overheating).
 struct FeaturedModelRow: View {
     let isInstalled: Bool
     let onInstall: () -> Void
